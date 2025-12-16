@@ -9,6 +9,7 @@ export class AudioPipeline {
   private audioContext: AudioContext | null = null;
   private sourceNode: MediaElementAudioSourceNode | null = null;
   private gainNode: GainNode | null = null;
+  private makeupGainNode: GainNode | null = null;  // 処理による音量低下を補正
 
   // AudioWorkletノード
   private upsamplerNode: AudioWorkletNode | null = null;
@@ -84,6 +85,9 @@ export class AudioPipeline {
       // ゲインノード（マスターボリューム）
       this.gainNode = this.audioContext.createGain();
 
+      // メイクアップゲインノード（処理による音量低下を補正）
+      this.makeupGainNode = this.audioContext.createGain();
+
       // 分析ノード
       this.analyserNode = this.audioContext.createAnalyser();
       this.analyserNode.fftSize = 2048;
@@ -129,7 +133,7 @@ export class AudioPipeline {
    * 処理チェーンを構築
    */
   private async buildProcessingChain(): Promise<void> {
-    if (!this.audioContext || !this.sourceNode || !this.gainNode || !this.analyserNode) {
+    if (!this.audioContext || !this.sourceNode || !this.gainNode || !this.makeupGainNode || !this.analyserNode) {
       return;
     }
 
@@ -174,8 +178,9 @@ export class AudioPipeline {
       console.log('[AudioPipeline] 空間処理をスキップ（フォールバック）');
     }
 
-    // 最終段：ゲインノード → 分析ノード → 出力
-    currentNode.connect(this.gainNode);
+    // 最終段：メイクアップゲイン → マスターゲイン → 分析ノード → 出力
+    currentNode.connect(this.makeupGainNode);
+    this.makeupGainNode.connect(this.gainNode);
     this.gainNode.connect(this.analyserNode);
     this.analyserNode.connect(this.audioContext.destination);
   }
@@ -203,6 +208,28 @@ export class AudioPipeline {
 
     // ハイレゾ設定（アップサンプリング + 周波数拡張）
     const hiResActive = settings.enabled && settings.hiResEnabled;
+
+    // メイクアップゲイン（処理による音量低下を補正）
+    if (this.makeupGainNode && this.audioContext) {
+      let makeupGain = 1.0;
+
+      // スペクトラル拡張時の補正（FFT窓関数による音量低下を補正）
+      if (hiResActive && settings.frequencyExtension.enabled) {
+        // 強度に応じて補正量を調整（強度が高いほど補正も大きく）
+        const intensityFactor = settings.frequencyExtension.intensity / 100;
+        makeupGain += 0.3 * intensityFactor;  // 最大+30%（約2.3dB）
+      }
+
+      // 空間オーディオ時の補正
+      if (settings.enabled && settings.spatialEnabled && settings.spatialAudio.enabled) {
+        // 早期反射やクロスフィードによる若干の音量変化を補正
+        if (settings.spatialAudio.mode === 'surround-71' || settings.spatialAudio.mode === 'atmos') {
+          makeupGain += 0.1;  // +10%（約0.8dB）
+        }
+      }
+
+      this.makeupGainNode.gain.setTargetAtTime(makeupGain, this.audioContext.currentTime, 0.05);
+    }
 
     // アップサンプラー設定
     if (this.upsamplerNode) {
@@ -355,6 +382,12 @@ export class AudioPipeline {
       } catch {}
     }
 
+    if (this.makeupGainNode) {
+      try {
+        this.makeupGainNode.disconnect();
+      } catch {}
+    }
+
     if (this.gainNode) {
       try {
         this.gainNode.disconnect();
@@ -381,6 +414,7 @@ export class AudioPipeline {
     this.upsamplerNode = null;
     this.spectralExtenderNode = null;
     this.spatialNode = null;
+    this.makeupGainNode = null;
     this.gainNode = null;
     this.analyserNode = null;
     this.frequencyData = null;
