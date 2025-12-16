@@ -32,12 +32,55 @@ function ToggleSwitch({ label, sublabel, enabled, onChange, color }: ToggleSwitc
   );
 }
 
+/**
+ * 設定に基づいて期待される遅延を計算（ミリ秒）
+ */
+function calculateExpectedLatency(settings: AudioSettings): number {
+  const sampleRate = 48000; // 基本サンプルレート
+  let totalSamples = 0;
+  const workletBufferSize = 128;
+  let activeNodes = 1;
+
+  // アップサンプラーの遅延
+  if (settings.hiResEnabled && settings.upsampling.enabled) {
+    activeNodes++;
+    const sincWindow = settings.lowLatencyMode ? 4 : 16;
+    totalSamples += sincWindow / 2;
+  }
+
+  // スペクトラル拡張の遅延
+  if (settings.hiResEnabled && settings.frequencyExtension.enabled) {
+    activeNodes++;
+    totalSamples += settings.lowLatencyMode ? 256 : 512;
+  }
+
+  // 空間オーディオの遅延
+  if (settings.spatialEnabled && settings.spatialAudio.enabled) {
+    activeNodes++;
+    const maxDelay = settings.lowLatencyMode ? 50 : 200;
+    totalSamples += maxDelay * (settings.spatialAudio.depth / 100);
+
+    if (settings.spatialAudio.mode === 'atmos') {
+      const heightDelay = (settings.lowLatencyMode ? 25 : 100) * (settings.spatialAudio.height / 100);
+      totalSamples += heightDelay;
+    }
+  }
+
+  totalSamples += workletBufferSize * activeNodes;
+
+  // 処理遅延のみ（ハードウェア遅延は接続時に加算される）
+  return (totalSamples / sampleRate) * 1000;
+}
+
 export default function App() {
   const [settings, setSettings] = useState<AudioSettings>(DEFAULT_SETTINGS);
   const [isConnected, setIsConnected] = useState(false);
-  const [latency, setLatency] = useState(0);
+  const [actualLatency, setActualLatency] = useState(0);
   const [gpuAvailable, setGpuAvailable] = useState(false);
   const [gpuActive, setGpuActive] = useState(false);
+
+  // 表示する遅延（接続時は実測値、未接続時は期待値）
+  const displayLatency = isConnected ? actualLatency : calculateExpectedLatency(settings);
 
   // GPU可用性チェック
   useEffect(() => {
@@ -63,7 +106,7 @@ export default function App() {
       const status = await getStatusFromCurrentTab();
       if (status) {
         setIsConnected(status.connected);
-        setLatency(status.latency);
+        setActualLatency(status.latency);
         setGpuActive(status.gpuActive || false);
       }
     };
@@ -254,7 +297,7 @@ export default function App() {
           <span>{isConnected ? '接続中' : '待機中'}</span>
         </div>
         <div className="status-item">
-          <span>遅延: {latency.toFixed(1)} ms</span>
+          <span>遅延: {displayLatency.toFixed(1)} ms</span>
         </div>
         <div className="status-item">
           <span>{settings.upsampling.targetSampleRate / 1000} kHz</span>

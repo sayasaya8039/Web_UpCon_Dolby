@@ -244,6 +244,7 @@ export class AudioPipeline {
 
   /**
    * 処理遅延を計算（ミリ秒）
+   * 設定に基づいて期待される遅延を計算（ノードの存在に依存しない）
    */
   private calculateProcessingLatency(): number {
     if (!this.audioContext || !this.settings) return 0;
@@ -255,25 +256,25 @@ export class AudioPipeline {
     const workletBufferSize = 128;
     let activeNodes = 1; // 最低1つ（gainNode）
 
-    // 2. アップサンプラーの遅延
-    if (this.settings.hiResEnabled && this.settings.upsampling.enabled && this.upsamplerNode) {
+    // 2. アップサンプラーの遅延（設定が有効な場合）
+    if (this.settings.hiResEnabled && this.settings.upsampling.enabled) {
       activeNodes++;
-      // Sinc補間のウィンドウサイズ
+      // Sinc補間のウィンドウサイズ（低遅延モードで短縮）
       const sincWindow = this.settings.lowLatencyMode ? 4 : 16;
       totalSamples += sincWindow / 2;
     }
 
-    // 3. スペクトラル拡張の遅延
-    if (this.settings.hiResEnabled && this.settings.frequencyExtension.enabled && this.spectralExtenderNode) {
+    // 3. スペクトラル拡張の遅延（設定が有効な場合）
+    if (this.settings.hiResEnabled && this.settings.frequencyExtension.enabled) {
       activeNodes++;
-      // FFTバッファサイズ（低遅延モードで削減）
+      // FFTバッファサイズ（低遅延モードで短縮）
       totalSamples += this.settings.lowLatencyMode ? 256 : 512;
     }
 
-    // 4. 空間オーディオの遅延
-    if (this.settings.spatialEnabled && this.settings.spatialAudio.enabled && this.spatialNode) {
+    // 4. 空間オーディオの遅延（設定が有効な場合）
+    if (this.settings.spatialEnabled && this.settings.spatialAudio.enabled) {
       activeNodes++;
-      // 遅延ラインのサイズ
+      // 遅延ラインのサイズ（低遅延モードで短縮）
       const maxDelay = this.settings.lowLatencyMode ? 50 : 200;
       const depthDelay = maxDelay * (this.settings.spatialAudio.depth / 100);
       totalSamples += depthDelay;
