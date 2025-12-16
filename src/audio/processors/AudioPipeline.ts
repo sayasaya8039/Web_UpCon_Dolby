@@ -5,6 +5,10 @@
 
 import type { AudioSettings, AudioStatus } from '@/types/audio.types';
 
+// MediaElementが既にAudioSourceに接続されているかを追跡（グローバル）
+// 同じMediaElementを複数回createMediaElementSourceに接続するとDOMExceptionが発生するため
+const connectedElements = new WeakMap<HTMLMediaElement, { context: AudioContext; source: MediaElementAudioSourceNode }>();
+
 export class AudioPipeline {
   private audioContext: AudioContext | null = null;
   private sourceNode: MediaElementAudioSourceNode | null = null;
@@ -27,6 +31,9 @@ export class AudioPipeline {
   // GPU/WebGPU
   private gpuDevice: GPUDevice | null = null;
   private gpuActive = false;
+
+  // Workletが正常に読み込まれたか
+  private workletsLoaded = false;
 
   /**
    * WebGPU初期化
@@ -55,12 +62,32 @@ export class AudioPipeline {
   }
 
   /**
+   * 拡張機能コンテキストが有効かチェック
+   */
+  private isExtensionContextValid(): boolean {
+    try {
+      return typeof chrome !== 'undefined' &&
+             chrome.runtime !== undefined &&
+             typeof chrome.runtime.getURL === 'function';
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * MediaElementに接続
    */
   async connect(element: HTMLMediaElement): Promise<void> {
     // 同じ要素に既に接続済みならスキップ
     if (this.currentElement === element && this.isConnected) {
       return;
+    }
+
+    // 拡張機能コンテキストが無効な場合はエラー
+    if (!this.isExtensionContextValid()) {
+      const error = new Error('拡張機能コンテキストが無効です。ページを再読み込みしてください。');
+      console.error('[AudioPipeline]', error.message);
+      throw error;
     }
 
     // 既存の接続をクリーンアップ
@@ -79,8 +106,16 @@ export class AudioPipeline {
       // AudioWorkletを登録
       await this.loadWorklets();
 
-      // ソースノード作成
+      // ソースノード作成（既存の接続を処理）
+      const existing = connectedElements.get(element);
+      if (existing && existing.context.state !== 'closed') {
+        console.log('[AudioPipeline] 既存の接続を検出、再利用します');
+        await existing.context.close();
+        connectedElements.delete(element);
+      }
+
       this.sourceNode = this.audioContext.createMediaElementSource(element);
+      connectedElements.set(element, { context: this.audioContext, source: this.sourceNode });
 
       // ゲインノード（マスターボリューム）
       this.gainNode = this.audioContext.createGain();
@@ -101,7 +136,12 @@ export class AudioPipeline {
 
       console.log('[AudioPipeline] 接続完了');
     } catch (error) {
-      console.error('[AudioPipeline] 接続エラー:', error);
+      // DOMExceptionの詳細を出力
+      if (error instanceof DOMException) {
+        console.error(`[AudioPipeline] 接続エラー (${error.name}): ${error.message}`);
+      } else {
+        console.error('[AudioPipeline] 接続エラー:', error);
+      }
       await this.disconnect();
       throw error;
     }
@@ -114,8 +154,9 @@ export class AudioPipeline {
     if (!this.audioContext) return;
 
     // 拡張機能コンテキストが無効な場合はスキップ
-    if (typeof chrome === 'undefined' || !chrome.runtime?.getURL) {
-      console.warn('[AudioPipeline] 拡張機能コンテキストが無効です。ページを再読み込みしてください。');
+    if (!this.isExtensionContextValid()) {
+      console.warn('[AudioPipeline] 拡張機能コンテキストが無効です。Workletは読み込まれません。');
+      this.workletsLoaded = false;
       return;
     }
 
@@ -125,13 +166,22 @@ export class AudioPipeline {
       'src/audio/worklets/spatial-processor.worklet.js',
     ];
 
+    let loadedCount = 0;
     for (const path of workletPaths) {
       try {
         const url = chrome.runtime.getURL(path);
         await this.audioContext.audioWorklet.addModule(url);
+        loadedCount++;
       } catch (error) {
         console.warn(`[AudioPipeline] Worklet読み込みスキップ: ${path}`, error);
       }
+    }
+
+    this.workletsLoaded = loadedCount === workletPaths.length;
+    if (this.workletsLoaded) {
+      console.log('[AudioPipeline] 全Worklet読み込み完了');
+    } else {
+      console.warn(`[AudioPipeline] Worklet読み込み: ${loadedCount}/${workletPaths.length} (パススルーモードで動作)`);
     }
   }
 
@@ -145,43 +195,48 @@ export class AudioPipeline {
 
     let currentNode: AudioNode = this.sourceNode;
 
-    // アップサンプラーノード
-    try {
-      this.upsamplerNode = new AudioWorkletNode(this.audioContext, 'upsampler-processor', {
-        numberOfInputs: 1,
-        numberOfOutputs: 1,
-        outputChannelCount: [2],
-      });
-      currentNode.connect(this.upsamplerNode);
-      currentNode = this.upsamplerNode;
-    } catch {
-      console.log('[AudioPipeline] アップサンプラーをスキップ（フォールバック）');
-    }
+    // Workletが読み込まれている場合のみAudioWorkletNodeを作成
+    if (this.workletsLoaded) {
+      // アップサンプラーノード
+      try {
+        this.upsamplerNode = new AudioWorkletNode(this.audioContext, 'upsampler-processor', {
+          numberOfInputs: 1,
+          numberOfOutputs: 1,
+          outputChannelCount: [2],
+        });
+        currentNode.connect(this.upsamplerNode);
+        currentNode = this.upsamplerNode;
+      } catch {
+        console.log('[AudioPipeline] アップサンプラーをスキップ');
+      }
 
-    // スペクトラル拡張ノード
-    try {
-      this.spectralExtenderNode = new AudioWorkletNode(this.audioContext, 'spectral-extender-processor', {
-        numberOfInputs: 1,
-        numberOfOutputs: 1,
-        outputChannelCount: [2],
-      });
-      currentNode.connect(this.spectralExtenderNode);
-      currentNode = this.spectralExtenderNode;
-    } catch {
-      console.log('[AudioPipeline] スペクトラル拡張をスキップ（フォールバック）');
-    }
+      // スペクトラル拡張ノード
+      try {
+        this.spectralExtenderNode = new AudioWorkletNode(this.audioContext, 'spectral-extender-processor', {
+          numberOfInputs: 1,
+          numberOfOutputs: 1,
+          outputChannelCount: [2],
+        });
+        currentNode.connect(this.spectralExtenderNode);
+        currentNode = this.spectralExtenderNode;
+      } catch {
+        console.log('[AudioPipeline] スペクトラル拡張をスキップ');
+      }
 
-    // 空間オーディオノード
-    try {
-      this.spatialNode = new AudioWorkletNode(this.audioContext, 'spatial-processor', {
-        numberOfInputs: 1,
-        numberOfOutputs: 1,
-        outputChannelCount: [2],
-      });
-      currentNode.connect(this.spatialNode);
-      currentNode = this.spatialNode;
-    } catch {
-      console.log('[AudioPipeline] 空間処理をスキップ（フォールバック）');
+      // 空間オーディオノード
+      try {
+        this.spatialNode = new AudioWorkletNode(this.audioContext, 'spatial-processor', {
+          numberOfInputs: 1,
+          numberOfOutputs: 1,
+          outputChannelCount: [2],
+        });
+        currentNode.connect(this.spatialNode);
+        currentNode = this.spatialNode;
+      } catch {
+        console.log('[AudioPipeline] 空間処理をスキップ');
+      }
+    } else {
+      console.log('[AudioPipeline] パススルーモード（Worklet未読込）');
     }
 
     // 最終段：メイクアップゲイン → マスターゲイン → 分析ノード → 出力
@@ -408,7 +463,11 @@ export class AudioPipeline {
       } catch {}
     }
 
+    // AudioContextを閉じる（connectedElementsから削除）
     if (this.audioContext && this.audioContext.state !== 'closed') {
+      if (this.currentElement) {
+        connectedElements.delete(this.currentElement);
+      }
       await this.audioContext.close();
     }
 
@@ -429,6 +488,7 @@ export class AudioPipeline {
     this.currentElement = null;
     this.isConnected = false;
     this.gpuActive = false;
+    this.workletsLoaded = false;
 
     console.log('[AudioPipeline] 切断完了');
   }

@@ -1,6 +1,6 @@
 {
   "name": "web-upcon-dolby",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "リアルタイム音声アップサンプリング・空間オーディオ Chrome拡張機能",
   "type": "module",
   "scripts": {
