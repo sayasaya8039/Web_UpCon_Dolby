@@ -37,6 +37,8 @@ export interface SpatialAudioSettings {
   depth: number;
   /** 高さ（上下の広がり） 0-100 */
   height: number;
+  /** HRTF強度 1-8（Dolby Atmos互換、デフォルト6） */
+  hrtfIntensity: number;
 }
 
 /** 全体設定 */

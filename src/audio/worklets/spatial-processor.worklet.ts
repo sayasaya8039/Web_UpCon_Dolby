@@ -17,6 +17,7 @@ interface SpatialSettings {
   width: number;    // ステレオ幅 (0-100)
   depth: number;    // 奥行き感 (0-100)
   height: number;   // 高さ感 (0-100)
+  hrtfIntensity: number;  // HRTF強度 1-8（Dolby Atmos互換）
   lowLatencyMode: boolean;
 }
 
@@ -27,6 +28,7 @@ class SpatialProcessor extends AudioWorkletProcessor {
     width: 50,
     depth: 30,
     height: 20,
+    hrtfIntensity: 6,
     lowLatencyMode: false,
   };
 
@@ -88,10 +90,18 @@ class SpatialProcessor extends AudioWorkletProcessor {
           width: event.data.width ?? this.settings.width,
           depth: event.data.depth ?? this.settings.depth,
           height: event.data.height ?? this.settings.height,
+          hrtfIntensity: event.data.hrtfIntensity ?? this.settings.hrtfIntensity,
           lowLatencyMode: event.data.lowLatencyMode ?? this.settings.lowLatencyMode,
         };
       }
     };
+  }
+
+  /**
+   * HRTF強度係数を計算（1-8 → 0.125-1.0）
+   */
+  private getHrtfScale(): number {
+    return this.settings.hrtfIntensity / 8;
   }
 
   /**
@@ -292,24 +302,25 @@ class SpatialProcessor extends AudioWorkletProcessor {
    */
   private processStereoWide(left: number, right: number): [number, number] {
     const width = this.settings.width / 100;
+    const hrtfScale = this.getHrtfScale();
 
     // M/S処理
     const mid = (left + right) * 0.5;
     const side = (left - right) * 0.5;
-    const enhancedSide = side * (1 + width);
+    const enhancedSide = side * (1 + width * hrtfScale);
 
     let outL = mid + enhancedSide;
     let outR = mid - enhancedSide;
 
     // サイド成分の強さから仮想パン位置を計算
-    const panAmount = Math.tanh(side * 3) * width;
+    const panAmount = Math.tanh(side * 3) * width * hrtfScale;
 
-    // ITD/ILD適用
+    // ITD/ILD適用（HRTF強度でスケール）
     [outL, outR] = this.applyITD(outL, outR, panAmount * 0.5);
     [outL, outR] = this.applyILD(outL, outR, panAmount * 0.3);
 
-    // クロスフィード
-    [outL, outR] = this.applyCrossfeed(outL, outR, 1 - width * 0.5);
+    // クロスフィード（HRTF強度でスケール）
+    [outL, outR] = this.applyCrossfeed(outL, outR, (1 - width * 0.5) * hrtfScale);
 
     return [outL, outR];
   }
@@ -318,14 +329,14 @@ class SpatialProcessor extends AudioWorkletProcessor {
    * サラウンド処理（7.1ch風）
    */
   private processSurround(left: number, right: number): [number, number] {
-    const width = this.settings.width / 100;
     const depth = this.settings.depth / 100;
+    const hrtfScale = this.getHrtfScale();
 
     // ステレオワイド
     let [outL, outR] = this.processStereoWide(left, right);
 
-    // 早期反射で空間感を追加
-    [outL, outR] = this.applyEarlyReflections(outL, outR, depth);
+    // 早期反射で空間感を追加（HRTF強度でスケール）
+    [outL, outR] = this.applyEarlyReflections(outL, outR, depth * hrtfScale);
 
     return [outL, outR];
   }
@@ -335,12 +346,13 @@ class SpatialProcessor extends AudioWorkletProcessor {
    */
   private processAtmos(left: number, right: number): [number, number] {
     const height = this.settings.height / 100;
+    const hrtfScale = this.getHrtfScale();
 
     // サラウンド処理
     let [outL, outR] = this.processSurround(left, right);
 
-    // 高さ成分追加
-    [outL, outR] = this.applyHeightCue(outL, outR, height);
+    // 高さ成分追加（HRTF強度でスケール）
+    [outL, outR] = this.applyHeightCue(outL, outR, height * hrtfScale);
 
     return [outL, outR];
   }

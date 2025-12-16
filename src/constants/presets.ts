@@ -25,6 +25,7 @@ export const DEFAULT_SETTINGS: AudioSettings = {
     width: 50,
     depth: 30,
     height: 20,
+    hrtfIntensity: 6,
   },
 };
 
@@ -51,6 +52,7 @@ export const PRESETS: Record<PresetType, Partial<AudioSettings>> = {
       width: 60,
       depth: 40,
       height: 30,
+      hrtfIntensity: 5,
     },
   },
   movie: {
@@ -74,6 +76,7 @@ export const PRESETS: Record<PresetType, Partial<AudioSettings>> = {
       width: 80,
       depth: 70,
       height: 50,
+      hrtfIntensity: 7,
     },
   },
   gaming: {
@@ -97,6 +100,7 @@ export const PRESETS: Record<PresetType, Partial<AudioSettings>> = {
       width: 100,
       depth: 100,
       height: 80,
+      hrtfIntensity: 8,
     },
   },
   custom: {

@@ -236,9 +236,10 @@ export class AudioPipeline {
         type: 'updateSettings',
         enabled: spatialActive && settings.spatialAudio.enabled,
         mode: settings.spatialAudio.mode,
-        width: settings.spatialAudio.width / 100,
-        depth: settings.spatialAudio.depth / 100,
-        height: settings.spatialAudio.height / 100,
+        width: settings.spatialAudio.width,
+        depth: settings.spatialAudio.depth,
+        height: settings.spatialAudio.height,
+        hrtfIntensity: settings.spatialAudio.hrtfIntensity,
         lowLatencyMode: settings.lowLatencyMode,
         useGPU: settings.useGPU && this.gpuActive,
       });
