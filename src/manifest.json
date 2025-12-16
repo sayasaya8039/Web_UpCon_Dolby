@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Web UpCon Dolby",
   "description": "配信サービスの音声をリアルタイムでアップサンプリング・空間オーディオ化",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",

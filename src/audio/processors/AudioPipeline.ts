@@ -78,8 +78,8 @@ export class AudioPipeline {
    * MediaElementに接続
    */
   async connect(element: HTMLMediaElement): Promise<void> {
-    // 同じ要素に既に接続済みならスキップ
-    if (this.currentElement === element && this.isConnected) {
+    // 同じ要素に既に接続済みで、AudioContextが有効ならスキップ
+    if (this.currentElement === element && this.isConnected && this.audioContext?.state === 'running') {
       return;
     }
 
@@ -90,32 +90,41 @@ export class AudioPipeline {
       throw error;
     }
 
-    // 既存の接続をクリーンアップ
-    await this.disconnect();
-
     try {
-      // AudioContext作成
-      // 注意: ブラウザによってはリクエストしたサンプルレートが無視される場合があります
-      const targetSampleRate = this.settings?.upsampling?.targetSampleRate ?? 48000;
-      this.audioContext = new AudioContext({
-        sampleRate: targetSampleRate,
-        latencyHint: 'interactive',
-      });
-      console.log(`[AudioPipeline] AudioContext作成: ${this.audioContext.sampleRate}Hz`);
-
-      // AudioWorkletを登録
-      await this.loadWorklets();
-
-      // ソースノード作成（既存の接続を処理）
+      // 既存の接続をチェック
       const existing = connectedElements.get(element);
+      
       if (existing && existing.context.state !== 'closed') {
-        console.log('[AudioPipeline] 既存の接続を検出、再利用します');
-        await existing.context.close();
-        connectedElements.delete(element);
-      }
+        // 既存の接続を再利用（MediaElementは一度しかcreateMediaElementSourceできない）
+        console.log('[AudioPipeline] 既存の接続を再利用');
+        
+        // 現在のパイプラインをクリーンアップ（AudioContextは閉じない）
+        await this.disconnectNodes();
+        
+        this.audioContext = existing.context;
+        this.sourceNode = existing.source;
+        
+        // AudioContextがsuspendされていたらresumeする
+        if (this.audioContext.state === 'suspended') {
+          await this.audioContext.resume();
+        }
+      } else {
+        // 新規接続
+        await this.disconnect();
+        
+        const targetSampleRate = this.settings?.upsampling?.targetSampleRate ?? 48000;
+        this.audioContext = new AudioContext({
+          sampleRate: targetSampleRate,
+          latencyHint: 'interactive',
+        });
+        console.log(`[AudioPipeline] AudioContext作成: ${this.audioContext.sampleRate}Hz`);
 
-      this.sourceNode = this.audioContext.createMediaElementSource(element);
-      connectedElements.set(element, { context: this.audioContext, source: this.sourceNode });
+        // AudioWorkletを登録
+        await this.loadWorklets();
+
+        this.sourceNode = this.audioContext.createMediaElementSource(element);
+        connectedElements.set(element, { context: this.audioContext, source: this.sourceNode });
+      }
 
       // ゲインノード（マスターボリューム）
       this.gainNode = this.audioContext.createGain();
@@ -148,10 +157,51 @@ export class AudioPipeline {
   }
 
   /**
+   * ノードのみを切断（AudioContextは維持）
+   */
+  private async disconnectNodes(): Promise<void> {
+    if (this.sourceNode) {
+      try { this.sourceNode.disconnect(); } catch {}
+    }
+    if (this.upsamplerNode) {
+      try { this.upsamplerNode.disconnect(); } catch {}
+    }
+    if (this.spectralExtenderNode) {
+      try { this.spectralExtenderNode.disconnect(); } catch {}
+    }
+    if (this.spatialNode) {
+      try { this.spatialNode.disconnect(); } catch {}
+    }
+    if (this.makeupGainNode) {
+      try { this.makeupGainNode.disconnect(); } catch {}
+    }
+    if (this.gainNode) {
+      try { this.gainNode.disconnect(); } catch {}
+    }
+    if (this.analyserNode) {
+      try { this.analyserNode.disconnect(); } catch {}
+    }
+    
+    this.upsamplerNode = null;
+    this.spectralExtenderNode = null;
+    this.spatialNode = null;
+    this.makeupGainNode = null;
+    this.gainNode = null;
+    this.analyserNode = null;
+    this.frequencyData = null;
+  }
+
+  /**
    * AudioWorkletを読み込み
    */
   private async loadWorklets(): Promise<void> {
     if (!this.audioContext) return;
+
+    // 既にWorkletが読み込まれている場合はスキップ
+    if (this.workletsLoaded) {
+      console.log('[AudioPipeline] Worklet既読込、スキップ');
+      return;
+    }
 
     // 拡張機能コンテキストが無効な場合はスキップ
     if (!this.isExtensionContextValid()) {
