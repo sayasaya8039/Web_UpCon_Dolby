@@ -122,40 +122,45 @@ function observeDOM(): void {
  */
 chrome.runtime.onMessage.addListener(
   (message: ExtensionMessage, _sender, sendResponse) => {
-    switch (message.type) {
-      case 'SET_SETTINGS':
-        currentSettings = message.payload as AudioSettings;
-        pipeline?.updateSettings(currentSettings);
-        sendResponse({ success: true });
-        break;
+    try {
+      switch (message.type) {
+        case 'SET_SETTINGS':
+          currentSettings = message.payload as AudioSettings;
+          pipeline?.updateSettings(currentSettings);
+          sendResponse({ success: true });
+          break;
 
-      case 'GET_SETTINGS':
-        sendResponse(currentSettings);
-        break;
+        case 'GET_SETTINGS':
+          sendResponse(currentSettings);
+          break;
 
-      case 'TOGGLE_ENABLED':
-        currentSettings = {
-          ...currentSettings,
-          enabled: !currentSettings.enabled,
-        };
-        pipeline?.updateSettings(currentSettings);
-        sendResponse({ success: true, enabled: currentSettings.enabled });
-        break;
+        case 'TOGGLE_ENABLED':
+          currentSettings = {
+            ...currentSettings,
+            enabled: !currentSettings.enabled,
+          };
+          pipeline?.updateSettings(currentSettings);
+          sendResponse({ success: true, enabled: currentSettings.enabled });
+          break;
 
-      case 'GET_STATUS':
-        const status: AudioStatus = pipeline?.getStatus() ?? {
-          connected: false,
-          inputSampleRate: 0,
-          outputSampleRate: 0,
-          latency: 0,
-          cpuUsage: 0,
-          gpuActive: false,
-        };
-        sendResponse(status);
-        break;
+        case 'GET_STATUS':
+          const status: AudioStatus = pipeline?.getStatus() ?? {
+            connected: false,
+            inputSampleRate: 0,
+            outputSampleRate: 0,
+            latency: 0,
+            cpuUsage: 0,
+            gpuActive: false,
+          };
+          sendResponse(status);
+          break;
 
-      default:
-        sendResponse({ error: 'Unknown message type' });
+        default:
+          sendResponse({ error: 'Unknown message type' });
+      }
+    } catch (error) {
+      console.error('[Content] メッセージ処理エラー:', error);
+      sendResponse({ error: 'Internal error' });
     }
     return true; // 非同期レスポンスを許可
   }

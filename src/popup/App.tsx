@@ -101,13 +101,17 @@ export default function App() {
   useEffect(() => {
     loadSettings().then(setSettings);
 
-    // ステータス取得
+    // ステータス取得（エラー時は無視）
     const checkStatus = async () => {
-      const status = await getStatusFromCurrentTab();
-      if (status) {
-        setIsConnected(status.connected);
-        setActualLatency(status.latency);
-        setGpuActive(status.gpuActive || false);
+      try {
+        const status = await getStatusFromCurrentTab();
+        if (status) {
+          setIsConnected(status.connected);
+          setActualLatency(status.latency);
+          setGpuActive(status.gpuActive || false);
+        }
+      } catch (e) {
+        // エラーは無視（未接続時など）
       }
     };
     checkStatus();
@@ -115,11 +119,24 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // 設定更新ハンドラー
-  const updateSettings = useCallback(async (newSettings: AudioSettings) => {
+  // 設定更新ハンドラー（非ブロッキング）
+  const updateSettings = useCallback((newSettings: AudioSettings) => {
+    // UIを即座に更新（楽観的更新）
     setSettings(newSettings);
-    await saveSettings(newSettings);
-    await sendSettingsToCurrentTab(newSettings);
+
+    // バックグラウンドで保存・送信（エラーは無視）
+    Promise.resolve().then(async () => {
+      try {
+        await saveSettings(newSettings);
+      } catch (e) {
+        console.warn('[App] 設定保存エラー:', e);
+      }
+      try {
+        await sendSettingsToCurrentTab(newSettings);
+      } catch (e) {
+        console.warn('[App] 設定送信エラー:', e);
+      }
+    });
   }, []);
 
   // メインスイッチ切り替え

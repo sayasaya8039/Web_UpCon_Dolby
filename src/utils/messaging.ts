@@ -17,23 +17,37 @@ function isContentScriptNotLoadedError(error: unknown): boolean {
 }
 
 /**
+ * タイムアウト付きPromise
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  return Promise.race([
+    promise,
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
+  ]);
+}
+
+/**
  * メッセージを送信（タブへ）
- * コンテンツスクリプトが読み込まれていない場合はnullを返す
+ * コンテンツスクリプトが読み込まれていない場合やタイムアウト時はnullを返す
  */
 export async function sendMessageToTab(
   tabId: number,
   message: ExtensionMessage
 ): Promise<unknown> {
   try {
-    return await chrome.tabs.sendMessage(tabId, message);
+    // 2秒でタイムアウト
+    const result = await withTimeout(
+      chrome.tabs.sendMessage(tabId, message),
+      2000
+    );
+    return result;
   } catch (error) {
     if (isContentScriptNotLoadedError(error)) {
       // コンテンツスクリプトが読み込まれていない（正常なケース）
-      console.log('[Messaging] コンテンツスクリプト未読み込み - ページを更新してください');
       return null;
     }
-    console.error('タブへのメッセージ送信に失敗:', error);
-    throw error;
+    console.warn('[Messaging] メッセージ送信エラー:', error);
+    return null;
   }
 }
 
