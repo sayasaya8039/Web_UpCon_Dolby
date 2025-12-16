@@ -107,9 +107,9 @@ export class AudioPipeline {
     if (!this.audioContext) return;
 
     const workletPaths = [
-      '/src/audio/worklets/upsampler.worklet.js',
-      '/src/audio/worklets/spectral-extender.worklet.js',
-      '/src/audio/worklets/spatial-processor.worklet.js',
+      'src/audio/worklets/upsampler.worklet.js',
+      'src/audio/worklets/spectral-extender.worklet.js',
+      'src/audio/worklets/spatial-processor.worklet.js',
     ];
 
     for (const path of workletPaths) {

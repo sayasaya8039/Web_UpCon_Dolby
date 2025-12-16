@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc && vite build && node scripts/build-worklets.js",
+    "build:worklets": "node scripts/build-worklets.js",
     "watch": "tsc --watch & vite build --watch",
     "preview": "vite preview",
     "lint": "eslint src --ext ts,tsx",
@@ -32,6 +33,7 @@
     "@typescript-eslint/eslint-plugin": "^8.50.0",
     "@typescript-eslint/parser": "^8.50.0",
     "@vitejs/plugin-react": "^5.1.2",
+    "esbuild": "^0.27.1",
     "eslint": "^9.39.2",
     "terser": "^5.44.1",
     "typescript": "^5.9.3",
