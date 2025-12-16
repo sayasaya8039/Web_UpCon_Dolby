@@ -87,6 +87,25 @@ export default function SpatialAudioControl({ settings, onChange }: SpatialAudio
                 />
               </div>
             )}
+
+            <div className="slider-group" style={{ marginTop: 12 }}>
+              <div className="slider-label">
+                <span>HRTF強度</span>
+                <span className="slider-value">{settings.hrtfIntensity}</span>
+              </div>
+              <input
+                type="range"
+                className="slider"
+                min="1"
+                max="8"
+                value={settings.hrtfIntensity}
+                onChange={(e) => onChange('hrtfIntensity', Number(e.target.value))}
+              />
+              <div className="slider-hints" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, opacity: 0.6, marginTop: 2 }}>
+                <span>自然</span>
+                <span>強調</span>
+              </div>
+            </div>
           </>
         )}
       </div>
