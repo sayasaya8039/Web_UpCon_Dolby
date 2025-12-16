@@ -1,14 +1,15 @@
 /**
  * Spectral Extender AudioWorklet Processor
- * 高調波生成による周波数帯域補完（エキサイター/SBR風処理）
+ * FFTベースの高域補間（upconvfe/SBR風処理）
  *
- * 低ビットレート音源で失われた高周波成分を、高調波生成によって補完します。
+ * 低ビットレート音源で失われた高周波成分を、スペクトラルバンドレプリケーション
+ * によって補完・復元します。
  */
 
 interface SpectralExtenderSettings {
   enabled: boolean;
-  maxFrequency: number;  // 目標上限周波数
-  intensity: number;     // 強度 (0-100)
+  maxFrequency: number;
+  intensity: number;
 }
 
 class SpectralExtenderProcessor extends AudioWorkletProcessor {
@@ -18,26 +19,57 @@ class SpectralExtenderProcessor extends AudioWorkletProcessor {
     intensity: 50,
   };
 
-  // ハイパスフィルタ状態（高調波抽出用）
-  private hpfState: { x1: number; x2: number; y1: number; y2: number }[] = [
-    { x1: 0, x2: 0, y1: 0, y2: 0 },
-    { x1: 0, x2: 0, y1: 0, y2: 0 },
-  ];
+  // FFT設定（小さめのサイズで安定性を優先）
+  private readonly FFT_SIZE = 1024;
+  private readonly HOP_SIZE = 256;  // 75%オーバーラップ
 
-  // ローパスフィルタ状態（高調波平滑化用）
-  private lpfState: { x1: number; y1: number }[] = [
-    { x1: 0, y1: 0 },
-    { x1: 0, y1: 0 },
-  ];
+  // 各チャンネルのバッファ
+  private inputRing: Float32Array[] = [];
+  private outputRing: Float32Array[] = [];
+  private inputPos: number = 0;
+  private outputPos: number = 0;
+  private hopCounter: number = 0;
 
-  // エンベロープフォロワー状態
-  private envelope: number[] = [0, 0];
+  // FFTバッファ
+  private fftReal: Float32Array;
+  private fftImag: Float32Array;
+  private window: Float32Array;
+  private windowSum: number = 0;
 
-  // 前サンプル（オーバーサンプリング補間用）
-  private prevSample: number[] = [0, 0];
+  // 位相オフセット
+  private phaseOffset: Float32Array;
+
+  // 初期レイテンシ用
+  private initialized: boolean = false;
+  private initCounter: number = 0;
 
   constructor() {
     super();
+
+    // 2チャンネル分のバッファ
+    for (let ch = 0; ch < 2; ch++) {
+      this.inputRing.push(new Float32Array(this.FFT_SIZE * 2));
+      this.outputRing.push(new Float32Array(this.FFT_SIZE * 2));
+    }
+
+    this.fftReal = new Float32Array(this.FFT_SIZE);
+    this.fftImag = new Float32Array(this.FFT_SIZE);
+
+    // Hann窓
+    this.window = new Float32Array(this.FFT_SIZE);
+    for (let i = 0; i < this.FFT_SIZE; i++) {
+      this.window[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / this.FFT_SIZE));
+      this.windowSum += this.window[i] * this.window[i];
+    }
+    // 正規化係数
+    this.windowSum = this.windowSum * this.FFT_SIZE / this.HOP_SIZE;
+
+    // 位相オフセット（固定パターン）
+    this.phaseOffset = new Float32Array(this.FFT_SIZE / 2);
+    for (let i = 0; i < this.phaseOffset.length; i++) {
+      // 擬似ランダムだが再現可能
+      this.phaseOffset[i] = ((i * 137) % 100) / 100 * 2 * Math.PI;
+    }
 
     this.port.onmessage = (event) => {
       if (event.data.type === 'updateSettings') {
@@ -51,177 +83,209 @@ class SpectralExtenderProcessor extends AudioWorkletProcessor {
   }
 
   /**
-   * 2次バターワースハイパスフィルタ
-   * カットオフ周波数以上の成分を抽出
+   * インプレースFFT
    */
-  private highpassFilter(
-    sample: number,
-    channel: number,
-    cutoffHz: number
-  ): number {
-    const w0 = (2 * Math.PI * cutoffHz) / sampleRate;
-    const cosw0 = Math.cos(w0);
-    const alpha = Math.sin(w0) / Math.sqrt(2);
+  private fft(real: Float32Array, imag: Float32Array, inverse: boolean): void {
+    const n = real.length;
+    const levels = Math.round(Math.log2(n));
 
-    const b0 = (1 + cosw0) / 2;
-    const b1 = -(1 + cosw0);
-    const b2 = (1 + cosw0) / 2;
-    const a0 = 1 + alpha;
-    const a1 = -2 * cosw0;
-    const a2 = 1 - alpha;
-
-    const state = this.hpfState[channel];
-    const output =
-      (b0 / a0) * sample +
-      (b1 / a0) * state.x1 +
-      (b2 / a0) * state.x2 -
-      (a1 / a0) * state.y1 -
-      (a2 / a0) * state.y2;
-
-    state.x2 = state.x1;
-    state.x1 = sample;
-    state.y2 = state.y1;
-    state.y1 = output;
-
-    return output;
-  }
-
-  /**
-   * 1次ローパスフィルタ（高調波の高周波ノイズを軽減）
-   */
-  private lowpassFilter(
-    sample: number,
-    channel: number,
-    cutoffHz: number
-  ): number {
-    const rc = 1 / (2 * Math.PI * cutoffHz);
-    const dt = 1 / sampleRate;
-    const alpha = dt / (rc + dt);
-
-    const state = this.lpfState[channel];
-    const output = state.y1 + alpha * (sample - state.y1);
-
-    state.x1 = sample;
-    state.y1 = output;
-
-    return output;
-  }
-
-  /**
-   * ソフトクリッピングによる高調波生成
-   * tanh関数を使用して自然な高調波を生成
-   */
-  private generateHarmonics(sample: number, drive: number): number {
-    // ドライブ量を調整（1.0〜5.0）
-    const driveAmount = 1 + drive * 4;
-    // tanh でソフトクリッピング
-    return Math.tanh(sample * driveAmount) / driveAmount;
-  }
-
-  /**
-   * 2倍オーバーサンプリングによる高調波生成
-   * より高い周波数の高調波を生成可能
-   */
-  private generateHarmonicsOversampled(
-    sample: number,
-    channel: number,
-    drive: number
-  ): number {
-    // 2倍オーバーサンプリング（線形補間）
-    const mid = (sample + this.prevSample[channel]) * 0.5;
-    this.prevSample[channel] = sample;
-
-    // 両方のサンプルで高調波生成
-    const h1 = this.generateHarmonics(mid, drive);
-    const h2 = this.generateHarmonics(sample, drive);
-
-    // 平均を返す（ダウンサンプリング）
-    return (h1 + h2) * 0.5;
-  }
-
-  /**
-   * エンベロープフォロワー（ダイナミクス追従）
-   */
-  private followEnvelope(sample: number, channel: number): number {
-    const attackTime = 0.001;  // 1ms
-    const releaseTime = 0.050; // 50ms
-
-    const attackCoef = 1 - Math.exp(-1 / (sampleRate * attackTime));
-    const releaseCoef = 1 - Math.exp(-1 / (sampleRate * releaseTime));
-
-    const inputLevel = Math.abs(sample);
-
-    if (inputLevel > this.envelope[channel]) {
-      this.envelope[channel] += attackCoef * (inputLevel - this.envelope[channel]);
-    } else {
-      this.envelope[channel] += releaseCoef * (inputLevel - this.envelope[channel]);
+    // ビットリバーサル
+    for (let i = 0; i < n; i++) {
+      let j = 0;
+      for (let k = 0; k < levels; k++) {
+        j = (j << 1) | ((i >> k) & 1);
+      }
+      if (j > i) {
+        let tmp = real[i]; real[i] = real[j]; real[j] = tmp;
+        tmp = imag[i]; imag[i] = imag[j]; imag[j] = tmp;
+      }
     }
 
-    return this.envelope[channel];
+    // バタフライ演算
+    for (let size = 2; size <= n; size *= 2) {
+      const half = size / 2;
+      const step = (inverse ? 2 : -2) * Math.PI / size;
+
+      for (let i = 0; i < n; i += size) {
+        for (let j = 0; j < half; j++) {
+          const angle = step * j;
+          const cos = Math.cos(angle);
+          const sin = Math.sin(angle);
+
+          const evenIdx = i + j;
+          const oddIdx = i + j + half;
+
+          const tr = real[oddIdx] * cos - imag[oddIdx] * sin;
+          const ti = real[oddIdx] * sin + imag[oddIdx] * cos;
+
+          real[oddIdx] = real[evenIdx] - tr;
+          imag[oddIdx] = imag[evenIdx] - ti;
+          real[evenIdx] = real[evenIdx] + tr;
+          imag[evenIdx] = imag[evenIdx] + ti;
+        }
+      }
+    }
+
+    if (inverse) {
+      for (let i = 0; i < n; i++) {
+        real[i] /= n;
+        imag[i] /= n;
+      }
+    }
   }
 
   /**
-   * オーディオ処理
+   * SBR処理
    */
+  private applySBR(): void {
+    const nyquist = sampleRate / 2;
+    const binCount = this.FFT_SIZE / 2;
+    const hzPerBin = nyquist / binCount;
+
+    // カットオフ推定（MP3/AACは通常16kHz付近でカット）
+    const cutoffHz = 15000;
+    const cutoffBin = Math.min(Math.floor(cutoffHz / hzPerBin), binCount - 1);
+
+    // 目標周波数
+    const targetHz = Math.min(this.settings.maxFrequency, nyquist * 0.9);
+    const targetBin = Math.min(Math.floor(targetHz / hzPerBin), binCount - 1);
+
+    if (targetBin <= cutoffBin) return;
+
+    const intensity = this.settings.intensity / 100;
+
+    // ソース帯域（8kHz〜15kHz付近）
+    const srcStartBin = Math.floor(8000 / hzPerBin);
+    const srcEndBin = cutoffBin;
+    const srcWidth = srcEndBin - srcStartBin;
+
+    if (srcWidth <= 0) return;
+
+    // 高域を補完
+    for (let destBin = cutoffBin + 1; destBin <= targetBin; destBin++) {
+      // ソース帯域からマッピング
+      const srcBin = srcStartBin + ((destBin - cutoffBin - 1) % srcWidth);
+
+      // 振幅と位相を取得
+      const re = this.fftReal[srcBin];
+      const im = this.fftImag[srcBin];
+      const mag = Math.sqrt(re * re + im * im);
+      const phase = Math.atan2(im, re);
+
+      // 減衰（高周波ほど弱く）
+      const ratio = (destBin - cutoffBin) / (targetBin - cutoffBin);
+      const atten = (1 - ratio * 0.7) * intensity;
+
+      // 位相シフト
+      const newPhase = phase + this.phaseOffset[destBin % this.phaseOffset.length];
+      const newMag = mag * atten;
+
+      // 正の周波数
+      this.fftReal[destBin] = newMag * Math.cos(newPhase);
+      this.fftImag[destBin] = newMag * Math.sin(newPhase);
+
+      // 負の周波数（対称）
+      const mirrorBin = this.FFT_SIZE - destBin;
+      if (mirrorBin > 0 && mirrorBin < this.FFT_SIZE) {
+        this.fftReal[mirrorBin] = newMag * Math.cos(-newPhase);
+        this.fftImag[mirrorBin] = newMag * Math.sin(-newPhase);
+      }
+    }
+  }
+
+  /**
+   * 1フレーム処理
+   */
+  private processFrame(channel: number): void {
+    const inRing = this.inputRing[channel];
+    const outRing = this.outputRing[channel];
+
+    // 窓関数適用してFFTバッファにコピー
+    for (let i = 0; i < this.FFT_SIZE; i++) {
+      const idx = (this.inputPos - this.FFT_SIZE + i + inRing.length) % inRing.length;
+      this.fftReal[i] = inRing[idx] * this.window[i];
+      this.fftImag[i] = 0;
+    }
+
+    // FFT
+    this.fft(this.fftReal, this.fftImag, false);
+
+    // SBR
+    this.applySBR();
+
+    // IFFT
+    this.fft(this.fftReal, this.fftImag, true);
+
+    // オーバーラップアド
+    const scale = this.HOP_SIZE / this.windowSum * 2;
+    for (let i = 0; i < this.FFT_SIZE; i++) {
+      const idx = (this.outputPos + i) % outRing.length;
+      outRing[idx] += this.fftReal[i] * this.window[i] * scale;
+    }
+  }
+
   process(
     inputs: Float32Array[][],
     outputs: Float32Array[][],
-    _parameters: Record<string, Float32Array>
+    _params: Record<string, Float32Array>
   ): boolean {
     const input = inputs[0];
     const output = outputs[0];
 
-    if (!input || !input.length || !output || !output.length) {
-      return true;
-    }
+    if (!input?.length || !output?.length) return true;
 
-    // 処理無効時はバイパス
+    const numCh = Math.min(input.length, output.length, 2);
+    const frameSize = input[0].length;
+
+    // バイパス
     if (!this.settings.enabled || this.settings.intensity <= 0) {
-      for (let ch = 0; ch < Math.min(input.length, output.length); ch++) {
+      for (let ch = 0; ch < numCh; ch++) {
         output[ch].set(input[ch]);
       }
       return true;
     }
 
-    // パラメータ計算
-    const intensity = this.settings.intensity / 100; // 0-1
-    const drive = intensity * 0.8; // 高調波生成の強度
-
-    // 高調波を抽出するためのハイパスカットオフ
-    // 元の音源のカットオフ（通常16kHz前後）の少し下から抽出
-    const hpfCutoff = Math.min(12000, this.settings.maxFrequency * 0.5);
-
-    // 高調波のローパスカットオフ（目標周波数）
-    const lpfCutoff = Math.min(this.settings.maxFrequency, sampleRate * 0.45);
-
-    for (let ch = 0; ch < Math.min(input.length, output.length); ch++) {
-      const inputChannel = input[ch];
-      const outputChannel = output[ch];
-
-      for (let i = 0; i < inputChannel.length; i++) {
-        const sample = inputChannel[i];
-
-        // エンベロープを追従（ダイナミクスに応じた処理）
-        const env = this.followEnvelope(sample, ch);
-
-        // 高調波生成（オーバーサンプリング使用）
-        const harmonics = this.generateHarmonicsOversampled(sample, ch, drive);
-
-        // 生成された高調波から高周波成分を抽出
-        const highFreqHarmonics = this.highpassFilter(harmonics - sample, ch, hpfCutoff);
-
-        // ローパスで高周波ノイズを軽減
-        const smoothedHarmonics = this.lowpassFilter(highFreqHarmonics, ch, lpfCutoff);
-
-        // エンベロープに基づいてブレンド量を調整（静かな部分では控えめに）
-        const dynamicMix = Math.min(1, env * 10) * intensity;
-
-        // 元の信号に高調波を加算
-        const mixed = sample + smoothedHarmonics * dynamicMix * 0.5;
-
-        // クリッピング防止
-        outputChannel[i] = Math.max(-1, Math.min(1, mixed));
+    // 初期化期間（バッファを埋める）
+    if (!this.initialized) {
+      for (let ch = 0; ch < numCh; ch++) {
+        output[ch].set(input[ch]);
+        for (let i = 0; i < frameSize; i++) {
+          this.inputRing[ch][this.inputPos + i] = input[ch][i];
+        }
       }
+      this.inputPos = (this.inputPos + frameSize) % this.inputRing[0].length;
+      this.initCounter += frameSize;
+      if (this.initCounter >= this.FFT_SIZE) {
+        this.initialized = true;
+        this.outputPos = this.inputPos;
+      }
+      return true;
+    }
+
+    // メイン処理
+    for (let i = 0; i < frameSize; i++) {
+      // 入力をリングバッファに書き込み
+      for (let ch = 0; ch < numCh; ch++) {
+        this.inputRing[ch][this.inputPos] = input[ch][i];
+      }
+      this.inputPos = (this.inputPos + 1) % this.inputRing[0].length;
+
+      this.hopCounter++;
+
+      // HOP_SIZEごとにFFT処理
+      if (this.hopCounter >= this.HOP_SIZE) {
+        for (let ch = 0; ch < numCh; ch++) {
+          this.processFrame(ch);
+        }
+        this.hopCounter = 0;
+      }
+
+      // 出力をリングバッファから読み取り
+      for (let ch = 0; ch < numCh; ch++) {
+        output[ch][i] = this.outputRing[ch][this.outputPos];
+        this.outputRing[ch][this.outputPos] = 0; // クリア
+      }
+      this.outputPos = (this.outputPos + 1) % this.outputRing[0].length;
     }
 
     return true;
