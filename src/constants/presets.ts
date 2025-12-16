@@ -1,30 +1,30 @@
 import type { AudioSettings, PresetType } from '@/types/audio.types';
 
-/** デフォルト設定 */
+/** デフォルト設定（安全のため初期状態は全てオフ） */
 export const DEFAULT_SETTINGS: AudioSettings = {
   enabled: true,
-  hiResEnabled: true,
-  spatialEnabled: true,
+  hiResEnabled: false,
+  spatialEnabled: false,
   useGPU: false,
   lowLatencyMode: false,
-  preset: 'music',
+  preset: 'custom',
   masterVolume: 100,
   upsampling: {
-    enabled: true,
-    targetSampleRate: 96000,
-    quality: 'sinc',
+    enabled: false,
+    targetSampleRate: 48000,
+    quality: 'linear',
   },
   frequencyExtension: {
-    enabled: true,
-    maxFrequency: 32000,
-    intensity: 50,
+    enabled: false,
+    maxFrequency: 24000,
+    intensity: 30,
   },
   spatialAudio: {
-    enabled: true,
-    mode: 'stereo-wide',
-    width: 60,
-    depth: 40,
-    height: 30,
+    enabled: false,
+    mode: 'off',
+    width: 50,
+    depth: 30,
+    height: 20,
   },
 };
 

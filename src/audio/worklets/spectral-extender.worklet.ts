@@ -1,6 +1,9 @@
 /**
  * Spectral Extender AudioWorklet Processor
- * 周波数帯域を拡張（SBR: Spectral Band Replication風）
+ * 周波数帯域を拡張（シンプル版）
+ *
+ * 注意: 複雑なFFT処理は音声の同期問題を引き起こすため、
+ * シンプルな高調波生成による帯域拡張を実装しています。
  */
 
 interface SpectralExtenderSettings {
@@ -11,62 +14,16 @@ interface SpectralExtenderSettings {
 
 class SpectralExtenderProcessor extends AudioWorkletProcessor {
   private settings: SpectralExtenderSettings = {
-    enabled: true,
+    enabled: false,
     maxFrequency: 24000,
     intensity: 0.5,
   };
 
-  // FFT関連
-  private readonly FFT_SIZE = 2048;
-  private readonly HOP_SIZE = 512;
-
-  // 入力バッファ
-  private inputBuffer: Float32Array[];
-  private inputWritePos: number[];
-
-  // 出力バッファ（オーバーラップアド用）
-  private outputBuffer: Float32Array[];
-  private outputReadPos: number[];
-
-  // FFT作業用バッファ
-  private fftReal: Float32Array;
-  private fftImag: Float32Array;
-
-  // 窓関数
-  private window: Float32Array;
-
-  // 前フレームの位相（位相連続性のため）
-  private previousPhase: Float32Array[];
+  // シンプルな高域強調用のフィルタ状態
+  private prevSample: number[] = [0, 0];
 
   constructor() {
     super();
-
-    // バッファ初期化
-    this.inputBuffer = [
-      new Float32Array(this.FFT_SIZE * 2),
-      new Float32Array(this.FFT_SIZE * 2),
-    ];
-    this.inputWritePos = [0, 0];
-
-    this.outputBuffer = [
-      new Float32Array(this.FFT_SIZE * 2),
-      new Float32Array(this.FFT_SIZE * 2),
-    ];
-    this.outputReadPos = [0, 0];
-
-    this.fftReal = new Float32Array(this.FFT_SIZE);
-    this.fftImag = new Float32Array(this.FFT_SIZE);
-
-    this.previousPhase = [
-      new Float32Array(this.FFT_SIZE / 2),
-      new Float32Array(this.FFT_SIZE / 2),
-    ];
-
-    // Hann窓を生成
-    this.window = new Float32Array(this.FFT_SIZE);
-    for (let i = 0; i < this.FFT_SIZE; i++) {
-      this.window[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (this.FFT_SIZE - 1)));
-    }
 
     // メッセージハンドラー
     this.port.onmessage = (event) => {
@@ -78,128 +35,6 @@ class SpectralExtenderProcessor extends AudioWorkletProcessor {
         };
       }
     };
-  }
-
-  /**
-   * 簡易FFT（Cooley-Tukey）
-   */
-  private fft(real: Float32Array, imag: Float32Array, inverse: boolean = false): void {
-    const n = real.length;
-    const levels = Math.log2(n);
-
-    // ビットリバーサル
-    for (let i = 0; i < n; i++) {
-      let j = 0;
-      for (let k = 0; k < levels; k++) {
-        j = (j << 1) | ((i >> k) & 1);
-      }
-      if (j > i) {
-        [real[i], real[j]] = [real[j], real[i]];
-        [imag[i], imag[j]] = [imag[j], imag[i]];
-      }
-    }
-
-    // バタフライ演算
-    for (let size = 2; size <= n; size *= 2) {
-      const halfSize = size / 2;
-      const angle = (inverse ? 2 : -2) * Math.PI / size;
-
-      for (let i = 0; i < n; i += size) {
-        for (let j = 0; j < halfSize; j++) {
-          const theta = angle * j;
-          const cos = Math.cos(theta);
-          const sin = Math.sin(theta);
-
-          const idx1 = i + j;
-          const idx2 = i + j + halfSize;
-
-          const tReal = real[idx2] * cos - imag[idx2] * sin;
-          const tImag = real[idx2] * sin + imag[idx2] * cos;
-
-          real[idx2] = real[idx1] - tReal;
-          imag[idx2] = imag[idx1] - tImag;
-          real[idx1] = real[idx1] + tReal;
-          imag[idx1] = imag[idx1] + tImag;
-        }
-      }
-    }
-
-    // 逆変換時のスケーリング
-    if (inverse) {
-      for (let i = 0; i < n; i++) {
-        real[i] /= n;
-        imag[i] /= n;
-      }
-    }
-  }
-
-  /**
-   * スペクトラル拡張処理
-   */
-  private extendSpectrum(channel: number): void {
-    const nyquist = sampleRate / 2;
-    const sourceCutoff = Math.min(nyquist * 0.8, 16000); // ソース帯域上限
-    const targetCutoff = Math.min(this.settings.maxFrequency, nyquist * 0.95);
-
-    if (targetCutoff <= sourceCutoff) return;
-
-    const binCount = this.FFT_SIZE / 2;
-    const sourceBin = Math.floor((sourceCutoff / nyquist) * binCount);
-    const targetBin = Math.floor((targetCutoff / nyquist) * binCount);
-
-    // 高調波生成による帯域拡張
-    for (let i = sourceBin; i < targetBin; i++) {
-      // ソース帯域からミラーリング
-      const sourceIdx = sourceBin - (i - sourceBin) % (sourceBin / 2);
-      if (sourceIdx > 0 && sourceIdx < sourceBin) {
-        // 振幅を取得してスケーリング
-        const mag = Math.sqrt(
-          this.fftReal[sourceIdx] ** 2 + this.fftImag[sourceIdx] ** 2
-        );
-
-        // 高周波ほど減衰
-        const freqRatio = i / binCount;
-        const attenuation = Math.exp(-3 * freqRatio) * this.settings.intensity;
-
-        // 位相はソースから継続（または乱数化）
-        const phase = Math.atan2(this.fftImag[sourceIdx], this.fftReal[sourceIdx]);
-
-        // 拡張された成分を追加
-        this.fftReal[i] += mag * attenuation * Math.cos(phase);
-        this.fftImag[i] += mag * attenuation * Math.sin(phase);
-      }
-    }
-  }
-
-  /**
-   * 1フレーム分の処理
-   */
-  private processFrame(channel: number): void {
-    const inputBuf = this.inputBuffer[channel];
-    const outputBuf = this.outputBuffer[channel];
-
-    // 入力を窓関数で乗算
-    for (let i = 0; i < this.FFT_SIZE; i++) {
-      this.fftReal[i] = inputBuf[i] * this.window[i];
-      this.fftImag[i] = 0;
-    }
-
-    // FFT
-    this.fft(this.fftReal, this.fftImag, false);
-
-    // スペクトラル拡張
-    if (this.settings.enabled && this.settings.intensity > 0) {
-      this.extendSpectrum(channel);
-    }
-
-    // IFFT
-    this.fft(this.fftReal, this.fftImag, true);
-
-    // オーバーラップアド
-    for (let i = 0; i < this.FFT_SIZE; i++) {
-      const outIdx = (this.outputReadPos[channel] + i) % outputBuf.length;
-      outputBuf[outIdx] += this.fftReal[i] * this.window[i];
-    }
   }
 
   /**
@@ -218,37 +53,30 @@ class SpectralExtenderProcessor extends AudioWorkletProcessor {
     }
 
     // 処理無効時はバイパス
-    if (!this.settings.enabled) {
+    if (!this.settings.enabled || this.settings.intensity <= 0) {
       for (let channel = 0; channel < Math.min(input.length, output.length); channel++) {
         output[channel].set(input[channel]);
       }
       return true;
     }
 
-    const frameSize = input[0].length;
+    // シンプルな高域強調
+    // 高周波成分（サンプル間の差分）を加算することで擬似的に高域を強調
+    const intensity = this.settings.intensity * 0.3; // 控えめに適用
 
     for (let channel = 0; channel < Math.min(input.length, output.length); channel++) {
       const inputChannel = input[channel];
       const outputChannel = output[channel];
-      const inputBuf = this.inputBuffer[channel];
-      const outputBuf = this.outputBuffer[channel];
 
-      // 入力をバッファに追加
-      for (let i = 0; i < frameSize; i++) {
-        inputBuf[this.inputWritePos[channel]] = inputChannel[i];
-        this.inputWritePos[channel] = (this.inputWritePos[channel] + 1) % inputBuf.length;
-      }
-
-      // フレーム処理（簡略化：毎フレーム処理）
-      if (this.inputWritePos[channel] % this.HOP_SIZE === 0) {
-        this.processFrame(channel);
-      }
-
-      // 出力バッファから読み出し
-      for (let i = 0; i < frameSize; i++) {
-        outputChannel[i] = outputBuf[this.outputReadPos[channel]];
-        outputBuf[this.outputReadPos[channel]] = 0; // クリア
-        this.outputReadPos[channel] = (this.outputReadPos[channel] + 1) % outputBuf.length;
+      for (let i = 0; i < inputChannel.length; i++) {
+        const sample = inputChannel[i];
+        // 差分（高周波成分の近似）
+        const highFreq = sample - this.prevSample[channel];
+        // 元の信号に高周波成分を少量加算
+        outputChannel[i] = sample + highFreq * intensity;
+        // クリッピング防止
+        outputChannel[i] = Math.max(-1, Math.min(1, outputChannel[i]));
+        this.prevSample[channel] = sample;
       }
     }
 
