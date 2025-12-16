@@ -113,6 +113,12 @@ export class AudioPipeline {
   private async loadWorklets(): Promise<void> {
     if (!this.audioContext) return;
 
+    // 拡張機能コンテキストが無効な場合はスキップ
+    if (typeof chrome === 'undefined' || !chrome.runtime?.getURL) {
+      console.warn('[AudioPipeline] 拡張機能コンテキストが無効です。ページを再読み込みしてください。');
+      return;
+    }
+
     const workletPaths = [
       'src/audio/worklets/upsampler.worklet.js',
       'src/audio/worklets/spectral-extender.worklet.js',
