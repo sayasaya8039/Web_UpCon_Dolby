@@ -12,6 +12,43 @@ let pipeline: AudioPipeline | null = null;
 let currentSettings: AudioSettings = DEFAULT_SETTINGS;
 let observedElements = new WeakSet<HTMLMediaElement>();
 
+const STORAGE_KEY = 'webUpconDolby_settings';
+
+/**
+ * ストレージから設定を読み込み、パイプラインに適用
+ */
+async function syncSettingsFromStorage(): Promise<void> {
+  try {
+    const result = await chrome.storage.local.get(STORAGE_KEY);
+    if (result[STORAGE_KEY]) {
+      const newSettings = { ...DEFAULT_SETTINGS, ...result[STORAGE_KEY] } as AudioSettings;
+      // 設定が変わった場合のみ更新
+      if (JSON.stringify(newSettings) !== JSON.stringify(currentSettings)) {
+        currentSettings = newSettings;
+        pipeline?.updateSettings(currentSettings);
+        console.log('[Web UpCon Dolby] 設定同期完了（ストレージ経由）');
+      }
+    }
+  } catch (error) {
+    // エラーは無視（初回起動時など）
+  }
+}
+
+/**
+ * ストレージ変更を監視
+ */
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === 'local' && changes[STORAGE_KEY]?.newValue) {
+    const savedSettings = changes[STORAGE_KEY].newValue as Partial<AudioSettings>;
+    const newSettings: AudioSettings = { ...DEFAULT_SETTINGS, ...savedSettings };
+    if (JSON.stringify(newSettings) !== JSON.stringify(currentSettings)) {
+      currentSettings = newSettings;
+      pipeline?.updateSettings(currentSettings);
+      console.log('[Web UpCon Dolby] 設定変更検出（リアルタイム同期）');
+    }
+  }
+});
+
 /**
  * MediaElementを監視してオーディオパイプラインを接続
  */
@@ -128,13 +165,17 @@ chrome.runtime.onMessage.addListener(
  * 初期化時に設定を読み込み
  */
 async function init(): Promise<void> {
+  // まずストレージから設定を読み込み（最も信頼性が高い）
+  await syncSettingsFromStorage();
+
+  // バックグラウンドからも設定を取得（フォールバック）
   try {
     const response = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
     if (response) {
       currentSettings = response as AudioSettings;
     }
   } catch (error) {
-    console.log('[Web UpCon Dolby] 設定読み込みスキップ（初回起動）');
+    console.log('[Web UpCon Dolby] バックグラウンド設定読み込みスキップ');
   }
 
   // DOM監視を開始

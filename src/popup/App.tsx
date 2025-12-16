@@ -249,9 +249,9 @@ export default function App() {
 
       {/* ステータスバー */}
       <footer className="status-bar">
-        <div className="status-item" title={!isConnected ? 'ページを更新してください' : ''}>
+        <div className="status-item" title={!isConnected ? '設定はストレージ経由で同期されます' : ''}>
           <div className={`status-dot ${isConnected ? 'connected' : ''}`} />
-          <span>{isConnected ? '接続中' : '未接続（要更新）'}</span>
+          <span>{isConnected ? '接続中' : '待機中'}</span>
         </div>
         <div className="status-item">
           <span>遅延: {latency.toFixed(1)} ms</span>
