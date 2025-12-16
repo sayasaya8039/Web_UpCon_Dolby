@@ -243,18 +243,69 @@ export class AudioPipeline {
   }
 
   /**
+   * 処理遅延を計算（ミリ秒）
+   */
+  private calculateProcessingLatency(): number {
+    if (!this.audioContext || !this.settings) return 0;
+
+    const sampleRate = this.audioContext.sampleRate;
+    let totalSamples = 0;
+
+    // 1. AudioWorkletのバッファサイズ（128サンプル × 処理ノード数）
+    const workletBufferSize = 128;
+    let activeNodes = 1; // 最低1つ（gainNode）
+
+    // 2. アップサンプラーの遅延
+    if (this.settings.hiResEnabled && this.settings.upsampling.enabled && this.upsamplerNode) {
+      activeNodes++;
+      // Sinc補間のウィンドウサイズ
+      const sincWindow = this.settings.lowLatencyMode ? 4 : 16;
+      totalSamples += sincWindow / 2;
+    }
+
+    // 3. スペクトラル拡張の遅延
+    if (this.settings.hiResEnabled && this.settings.frequencyExtension.enabled && this.spectralExtenderNode) {
+      activeNodes++;
+      // FFTバッファサイズ（低遅延モードで削減）
+      totalSamples += this.settings.lowLatencyMode ? 256 : 512;
+    }
+
+    // 4. 空間オーディオの遅延
+    if (this.settings.spatialEnabled && this.settings.spatialAudio.enabled && this.spatialNode) {
+      activeNodes++;
+      // 遅延ラインのサイズ
+      const maxDelay = this.settings.lowLatencyMode ? 50 : 200;
+      const depthDelay = maxDelay * (this.settings.spatialAudio.depth / 100);
+      totalSamples += depthDelay;
+
+      // Atmos時は高さ成分の遅延も追加
+      if (this.settings.spatialAudio.mode === 'atmos') {
+        const heightDelay = (this.settings.lowLatencyMode ? 25 : 100) * (this.settings.spatialAudio.height / 100);
+        totalSamples += heightDelay;
+      }
+    }
+
+    // 5. AudioWorkletバッファ遅延
+    totalSamples += workletBufferSize * activeNodes;
+
+    // 6. ハードウェア遅延
+    const hardwareLatency = (this.audioContext.baseLatency + this.audioContext.outputLatency) * 1000;
+
+    // 合計遅延（サンプル→ミリ秒変換 + ハードウェア遅延）
+    const processingLatency = (totalSamples / sampleRate) * 1000;
+
+    return hardwareLatency + processingLatency;
+  }
+
+  /**
    * ステータスを取得
    */
   getStatus(): AudioStatus {
-    const latency = this.audioContext
-      ? (this.audioContext.baseLatency + this.audioContext.outputLatency) * 1000
-      : 0;
-
     return {
       connected: this.isConnected,
       inputSampleRate: this.audioContext?.sampleRate ?? 0,
       outputSampleRate: this.settings?.upsampling.targetSampleRate ?? 48000,
-      latency,
+      latency: this.calculateProcessingLatency(),
       cpuUsage: 0,
       gpuActive: this.gpuActive,
     };
