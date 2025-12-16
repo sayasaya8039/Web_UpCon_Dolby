@@ -91,27 +91,35 @@ export class AudioPipeline {
     }
 
     try {
-      // 既存の接続をチェック
+      // 既存の接続をチェック（グローバルまたはインスタンス）
       const existing = connectedElements.get(element);
+      const hasExistingConnection = existing && existing.context.state !== 'closed';
+      const hasSelfConnection = this.currentElement === element && this.audioContext?.state !== 'closed';
       
-      if (existing && existing.context.state !== 'closed') {
+      if (hasExistingConnection || hasSelfConnection) {
         // 既存の接続を再利用（MediaElementは一度しかcreateMediaElementSourceできない）
         console.log('[AudioPipeline] 既存の接続を再利用');
         
-        // 現在のパイプラインをクリーンアップ（AudioContextは閉じない）
+        // 処理ノードのみクリーンアップ
         await this.disconnectNodes();
         
-        this.audioContext = existing.context;
-        this.sourceNode = existing.source;
+        if (hasExistingConnection) {
+          this.audioContext = existing.context;
+          this.sourceNode = existing.source;
+        }
+        // hasSelfConnectionの場合はthis.audioContext, this.sourceNodeをそのまま使用
         
         // AudioContextがsuspendされていたらresumeする
-        if (this.audioContext.state === 'suspended') {
+        if (this.audioContext && this.audioContext.state === 'suspended') {
           await this.audioContext.resume();
         }
+
+        // Workletが読み込まれていない場合は読み込む
+        if (!this.workletsLoaded) {
+          await this.loadWorklets();
+        }
       } else {
-        // 新規接続
-        await this.disconnect();
-        
+        // 新規接続（このelementに対して初めての接続）
         const targetSampleRate = this.settings?.upsampling?.targetSampleRate ?? 48000;
         this.audioContext = new AudioContext({
           sampleRate: targetSampleRate,
@@ -127,13 +135,13 @@ export class AudioPipeline {
       }
 
       // ゲインノード（マスターボリューム）
-      this.gainNode = this.audioContext.createGain();
+      this.gainNode = this.audioContext!.createGain();
 
       // メイクアップゲインノード（処理による音量低下を補正）
-      this.makeupGainNode = this.audioContext.createGain();
+      this.makeupGainNode = this.audioContext!.createGain();
 
       // 分析ノード
-      this.analyserNode = this.audioContext.createAnalyser();
+      this.analyserNode = this.audioContext!.createAnalyser();
       this.analyserNode.fftSize = 2048;
       this.frequencyData = new Uint8Array(this.analyserNode.frequencyBinCount);
 
@@ -151,7 +159,8 @@ export class AudioPipeline {
       } else {
         console.error('[AudioPipeline] 接続エラー:', error);
       }
-      await this.disconnect();
+      // エラー時は状態をリセット（AudioContextは維持）
+      this.isConnected = false;
       throw error;
     }
   }
@@ -468,56 +477,34 @@ export class AudioPipeline {
   }
 
   /**
-   * 切断
+   * 切断（AudioContextは維持 - MediaElementは再接続できないため）
    */
   async disconnect(): Promise<void> {
-    if (this.sourceNode) {
-      try {
-        this.sourceNode.disconnect();
-      } catch {}
+    // ノードの切断のみ行う（AudioContextとSourceNodeは維持）
+    await this.disconnectNodes();
+
+    // GPUデバイスは解放
+    if (this.gpuDevice) {
+      this.gpuDevice.destroy();
+      this.gpuDevice = null;
     }
 
-    if (this.upsamplerNode) {
-      try {
-        this.upsamplerNode.disconnect();
-      } catch {}
-    }
+    // 注意: audioContext, sourceNode, currentElementは維持
+    // connectedElementsからも削除しない（MediaElementは一度しか接続できないため）
+    this.isConnected = false;
+    this.gpuActive = false;
 
-    if (this.spectralExtenderNode) {
-      try {
-        this.spectralExtenderNode.disconnect();
-      } catch {}
-    }
+    console.log('[AudioPipeline] 切断完了（AudioContext維持）');
+  }
 
-    if (this.spatialNode) {
-      try {
-        this.spatialNode.disconnect();
-      } catch {}
-    }
+  /**
+   * 完全に破棄（ページ遷移時など）
+   */
+  async destroy(): Promise<void> {
+    await this.disconnectNodes();
 
-    if (this.makeupGainNode) {
-      try {
-        this.makeupGainNode.disconnect();
-      } catch {}
-    }
-
-    if (this.gainNode) {
-      try {
-        this.gainNode.disconnect();
-      } catch {}
-    }
-
-    if (this.analyserNode) {
-      try {
-        this.analyserNode.disconnect();
-      } catch {}
-    }
-
-    // AudioContextを閉じる（connectedElementsから削除）
+    // AudioContextを閉じる
     if (this.audioContext && this.audioContext.state !== 'closed') {
-      if (this.currentElement) {
-        connectedElements.delete(this.currentElement);
-      }
       await this.audioContext.close();
     }
 
@@ -528,18 +515,11 @@ export class AudioPipeline {
 
     this.audioContext = null;
     this.sourceNode = null;
-    this.upsamplerNode = null;
-    this.spectralExtenderNode = null;
-    this.spatialNode = null;
-    this.makeupGainNode = null;
-    this.gainNode = null;
-    this.analyserNode = null;
-    this.frequencyData = null;
     this.currentElement = null;
     this.isConnected = false;
     this.gpuActive = false;
     this.workletsLoaded = false;
 
-    console.log('[AudioPipeline] 切断完了');
+    console.log('[AudioPipeline] 完全破棄');
   }
 }
