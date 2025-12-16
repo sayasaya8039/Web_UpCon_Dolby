@@ -99,6 +99,11 @@ export default function App() {
     updateSettings({ ...settings, useGPU: !settings.useGPU });
   }, [settings, updateSettings]);
 
+  // 低遅延モード切り替え
+  const toggleLowLatency = useCallback(() => {
+    updateSettings({ ...settings, lowLatencyMode: !settings.lowLatencyMode, preset: 'custom' });
+  }, [settings, updateSettings]);
+
   // プリセット変更
   const handlePresetChange = useCallback((preset: PresetType) => {
     const presetSettings = PRESETS[preset];
@@ -190,6 +195,13 @@ export default function App() {
               color="#10b981"
             />
           )}
+          <ToggleSwitch
+            label="低遅延モード"
+            sublabel={settings.lowLatencyMode ? '遅延最小化（音質↓）' : '高音質（遅延↑）'}
+            enabled={settings.lowLatencyMode}
+            onChange={toggleLowLatency}
+            color="#ef4444"
+          />
         </section>
 
         {/* スペクトラムビジュアライザー */}

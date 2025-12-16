@@ -208,6 +208,7 @@ export class AudioPipeline {
         enabled: hiResActive && settings.upsampling.enabled,
         targetSampleRate: settings.upsampling.targetSampleRate,
         quality: settings.upsampling.quality,
+        lowLatencyMode: settings.lowLatencyMode,
         useGPU: settings.useGPU && this.gpuActive,
       });
     }
@@ -219,6 +220,7 @@ export class AudioPipeline {
         enabled: hiResActive && settings.frequencyExtension.enabled,
         maxFrequency: settings.frequencyExtension.maxFrequency,
         intensity: settings.frequencyExtension.intensity / 100,
+        lowLatencyMode: settings.lowLatencyMode,
         useGPU: settings.useGPU && this.gpuActive,
       });
     }
@@ -234,6 +236,7 @@ export class AudioPipeline {
         width: settings.spatialAudio.width / 100,
         depth: settings.spatialAudio.depth / 100,
         height: settings.spatialAudio.height / 100,
+        lowLatencyMode: settings.lowLatencyMode,
         useGPU: settings.useGPU && this.gpuActive,
       });
     }

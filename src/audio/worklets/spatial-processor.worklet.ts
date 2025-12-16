@@ -11,6 +11,7 @@ interface SpatialSettings {
   width: number;
   depth: number;
   height: number;
+  lowLatencyMode: boolean;
 }
 
 class SpatialProcessor extends AudioWorkletProcessor {
@@ -20,6 +21,7 @@ class SpatialProcessor extends AudioWorkletProcessor {
     width: 0.6,
     depth: 0.4,
     height: 0.3,
+    lowLatencyMode: false,
   };
 
   // 簡易HRTFフィルタ係数（実際はもっと長いインパルス応答を使用）
@@ -93,6 +95,7 @@ class SpatialProcessor extends AudioWorkletProcessor {
           width: event.data.width ?? this.settings.width,
           depth: event.data.depth ?? this.settings.depth,
           height: event.data.height ?? this.settings.height,
+          lowLatencyMode: event.data.lowLatencyMode ?? this.settings.lowLatencyMode,
         };
       }
     };
@@ -221,6 +224,8 @@ class SpatialProcessor extends AudioWorkletProcessor {
   ): void {
     const width = this.settings.width;
     const depth = this.settings.depth;
+    // 低遅延モードでは遅延を大幅に削減
+    const maxDelayTime = this.settings.lowLatencyMode ? 50 : 200;
 
     // 仮想スピーカー位置からのHRTF適用
     const frontLeft = this.hrtfFilters.get('front-left')!;
@@ -241,7 +246,7 @@ class SpatialProcessor extends AudioWorkletProcessor {
       outR -= side;
 
       // リア成分（遅延付き反響）
-      const delayTime = Math.floor(depth * 200); // 最大200サンプル遅延
+      const delayTime = Math.floor(depth * maxDelayTime);
       const delayIdx = (this.delayWritePos[0] - delayTime + this.MAX_DELAY) % this.MAX_DELAY;
 
       const rearL = this.delayLines[0][delayIdx] * depth * 0.2;
@@ -274,6 +279,8 @@ class SpatialProcessor extends AudioWorkletProcessor {
     this.process71Surround(left, right, outputLeft, outputRight);
 
     const height = this.settings.height;
+    // 低遅延モードでは遅延を大幅に削減
+    const maxHeightDelay = this.settings.lowLatencyMode ? 25 : 100;
 
     // 高さ成分を追加
     const topFront = this.hrtfFilters.get('top-front')!;
@@ -288,7 +295,7 @@ class SpatialProcessor extends AudioWorkletProcessor {
       const highFreqR = (right[i] - prevR) * height * 0.15;
 
       // 遅延を加えて天井反射をシミュレート
-      const heightDelay = Math.floor(height * 100);
+      const heightDelay = Math.floor(height * maxHeightDelay);
       const heightDelayIdx = (this.delayWritePos[2] - heightDelay + this.MAX_DELAY) % this.MAX_DELAY;
 
       outputLeft[i] += this.delayLines[2][heightDelayIdx] * height * 0.1;

@@ -49,6 +49,8 @@ export interface AudioSettings {
   spatialEnabled: boolean;
   /** GPUアクセラレーション使用 */
   useGPU: boolean;
+  /** 低遅延モード（音質を犠牲に遅延を最小化） */
+  lowLatencyMode: boolean;
   /** 現在のプリセット */
   preset: PresetType;
   /** マスターボリューム 0-100 */

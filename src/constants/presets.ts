@@ -6,6 +6,7 @@ export const DEFAULT_SETTINGS: AudioSettings = {
   hiResEnabled: true,
   spatialEnabled: true,
   useGPU: false,
+  lowLatencyMode: false,
   preset: 'music',
   masterVolume: 100,
   upsampling: {
@@ -33,6 +34,7 @@ export const PRESETS: Record<PresetType, Partial<AudioSettings>> = {
     preset: 'music',
     hiResEnabled: true,
     spatialEnabled: true,
+    lowLatencyMode: false,
     upsampling: {
       enabled: true,
       targetSampleRate: 96000,
@@ -55,6 +57,7 @@ export const PRESETS: Record<PresetType, Partial<AudioSettings>> = {
     preset: 'movie',
     hiResEnabled: true,
     spatialEnabled: true,
+    lowLatencyMode: false,
     upsampling: {
       enabled: true,
       targetSampleRate: 48000,
@@ -77,6 +80,7 @@ export const PRESETS: Record<PresetType, Partial<AudioSettings>> = {
     preset: 'gaming',
     hiResEnabled: false,
     spatialEnabled: true,
+    lowLatencyMode: true,
     upsampling: {
       enabled: true,
       targetSampleRate: 48000,

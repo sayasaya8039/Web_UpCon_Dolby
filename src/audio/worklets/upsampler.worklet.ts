@@ -7,6 +7,7 @@ interface UpsamplerSettings {
   enabled: boolean;
   targetSampleRate: number;
   quality: 'linear' | 'sinc';
+  lowLatencyMode: boolean;
 }
 
 class UpsamplerProcessor extends AudioWorkletProcessor {
@@ -14,11 +15,14 @@ class UpsamplerProcessor extends AudioWorkletProcessor {
     enabled: true,
     targetSampleRate: 96000,
     quality: 'sinc',
+    lowLatencyMode: false,
   };
 
   // Sinc補間用のフィルタ係数キャッシュ
   private sincTable: Float32Array;
+  private sincTableFast: Float32Array;
   private readonly SINC_WINDOW_SIZE = 16;
+  private readonly SINC_WINDOW_SIZE_FAST = 4; // 低遅延モード用
 
   // 前サンプルの保持（補間用）
   private previousSamples: Float32Array[];
@@ -28,7 +32,8 @@ class UpsamplerProcessor extends AudioWorkletProcessor {
     super();
 
     // Sinc関数テーブルを事前計算
-    this.sincTable = this.generateSincTable();
+    this.sincTable = this.generateSincTable(this.SINC_WINDOW_SIZE);
+    this.sincTableFast = this.generateSincTable(this.SINC_WINDOW_SIZE_FAST);
 
     // 各チャンネルのバッファを初期化
     this.previousSamples = [
@@ -43,6 +48,7 @@ class UpsamplerProcessor extends AudioWorkletProcessor {
           enabled: event.data.enabled ?? this.settings.enabled,
           targetSampleRate: event.data.targetSampleRate ?? this.settings.targetSampleRate,
           quality: event.data.quality ?? this.settings.quality,
+          lowLatencyMode: event.data.lowLatencyMode ?? this.settings.lowLatencyMode,
         };
       }
     };
@@ -51,19 +57,19 @@ class UpsamplerProcessor extends AudioWorkletProcessor {
   /**
    * Sinc関数テーブルを生成
    */
-  private generateSincTable(): Float32Array {
-    const size = this.SINC_WINDOW_SIZE * 256; // 高精度補間用
+  private generateSincTable(windowSize: number): Float32Array {
+    const size = windowSize * 256; // 高精度補間用
     const table = new Float32Array(size);
 
     for (let i = 0; i < size; i++) {
-      const x = (i / 256) - this.SINC_WINDOW_SIZE / 2;
+      const x = (i / 256) - windowSize / 2;
       if (Math.abs(x) < 0.0001) {
         table[i] = 1;
       } else {
         // Windowed Sinc (Lanczos window)
         const sinc = Math.sin(Math.PI * x) / (Math.PI * x);
-        const window = Math.sin(Math.PI * x / (this.SINC_WINDOW_SIZE / 2)) /
-                       (Math.PI * x / (this.SINC_WINDOW_SIZE / 2));
+        const window = Math.sin(Math.PI * x / (windowSize / 2)) /
+                       (Math.PI * x / (windowSize / 2));
         table[i] = sinc * window;
       }
     }
@@ -98,15 +104,19 @@ class UpsamplerProcessor extends AudioWorkletProcessor {
     const index = Math.floor(position);
     const fraction = position - index;
 
+    // 低遅延モードでは短いウィンドウを使用
+    const windowSize = this.settings.lowLatencyMode ? this.SINC_WINDOW_SIZE_FAST : this.SINC_WINDOW_SIZE;
+    const table = this.settings.lowLatencyMode ? this.sincTableFast : this.sincTable;
+    const halfWindow = windowSize / 2;
+
     let result = 0;
-    const halfWindow = this.SINC_WINDOW_SIZE / 2;
 
     for (let i = -halfWindow; i < halfWindow; i++) {
       const sampleIndex = index + i + bufferOffset;
       if (sampleIndex >= 0 && sampleIndex < samples.length) {
         // Sincテーブルから補間係数を取得
         const tableIndex = Math.round((i - fraction + halfWindow) * 256);
-        const coef = this.sincTable[tableIndex] ?? 0;
+        const coef = table[tableIndex] ?? 0;
         result += samples[sampleIndex] * coef;
       }
     }
@@ -151,11 +161,13 @@ class UpsamplerProcessor extends AudioWorkletProcessor {
         // ダウンサンプリングまたは同一レートの場合はそのまま
         outputChannel.set(inputChannel);
       } else {
-        // 補間処理
+        // 補間処理（低遅延モードでは線形補間を優先）
+        const useSinc = this.settings.quality === 'sinc' && !this.settings.lowLatencyMode;
+
         for (let i = 0; i < outputChannel.length; i++) {
           const srcPosition = i / ratio;
 
-          if (this.settings.quality === 'sinc') {
+          if (useSinc) {
             outputChannel[i] = this.sincInterpolate(inputChannel, srcPosition, 0);
           } else {
             outputChannel[i] = this.linearInterpolate(inputChannel, srcPosition);
