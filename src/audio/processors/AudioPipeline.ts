@@ -217,14 +217,16 @@ export class AudioPipeline {
       if (hiResActive && settings.frequencyExtension.enabled) {
         // 強度に応じて補正量を調整（強度が高いほど補正も大きく）
         const intensityFactor = settings.frequencyExtension.intensity / 100;
-        makeupGain += 0.3 * intensityFactor;  // 最大+30%（約2.3dB）
+        makeupGain += 0.45 * intensityFactor;  // 最大+45%（約3.2dB）
       }
 
       // 空間オーディオ時の補正
       if (settings.enabled && settings.spatialEnabled && settings.spatialAudio.enabled) {
         // 早期反射やクロスフィードによる若干の音量変化を補正
         if (settings.spatialAudio.mode === 'surround-71' || settings.spatialAudio.mode === 'atmos') {
-          makeupGain += 0.1;  // +10%（約0.8dB）
+          makeupGain += 0.15;  // +15%（約1.2dB）
+        } else if (settings.spatialAudio.mode === 'stereo-wide') {
+          makeupGain += 0.08;  // +8%（約0.7dB）
         }
       }
 
