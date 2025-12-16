@@ -159,6 +159,29 @@ gh release create v1.0  # リリース作成
 - バージョン更新はコミットメッセージに含める
   - 例: `[feat] v1.2.0 - 新機能を追加`
 
+#### アプリ内バージョン表示
+
+**すべてのアプリ・拡張機能にバージョン番号をUI上に表示すること**
+
+| プロジェクト種類 | 表示場所 | 取得方法 |
+|------------------|----------|----------|
+| Chrome拡張機能 | ヘッダーまたはフッター | `chrome.runtime.getManifest().version` |
+| Webアプリ | ヘッダーまたはフッター | `package.json`からインポート or 環境変数 |
+| Windowsアプリ | タイトルバーまたは設定画面 | `__version__` 変数 or リソースファイル |
+
+```tsx
+// Chrome拡張機能の例
+const version = chrome.runtime.getManifest().version;
+<span>v{version}</span>
+
+// Webアプリの例（Vite）
+<span>v{import.meta.env.VITE_APP_VERSION}</span>
+
+// Pythonアプリの例
+from myapp import __version__
+self.setWindowTitle(f"MyApp v{__version__}")
+```
+
 ### EXEファイルのリリース
 
 WindowsアプリのEXEファイルはGitHub Releasesで配布する。

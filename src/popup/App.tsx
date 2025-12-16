@@ -201,13 +201,19 @@ export default function App() {
     });
   }, [settings, updateSettings]);
 
+  // バージョン取得
+  const version = chrome.runtime.getManifest().version;
+
   return (
     <div className="popup">
       {/* ヘッダー */}
       <header className="header">
         <div className="header-title">
           <div className="logo">🎵</div>
-          <h1>Web UpCon Dolby</h1>
+          <div>
+            <h1 style={{ margin: 0 }}>Web UpCon Dolby</h1>
+            <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>v{version}</span>
+          </div>
         </div>
         <div className="main-switch">
           <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
