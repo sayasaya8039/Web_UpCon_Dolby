@@ -1,0 +1,26 @@
+# 依存関係
+node_modules/
+
+# ビルド出力
+Web_UpCon_Dolby/
+*.zip
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# ログ
+*.log
+npm-debug.log*
+
+# 環境変数
+.env
+.env.*
+
+# キャッシュ
+.cache/
+*.tsbuildinfo

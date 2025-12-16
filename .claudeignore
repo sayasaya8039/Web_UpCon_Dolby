@@ -1,0 +1,25 @@
+## .claudeignore の修正版
+```
+# 依存関係
+node_modules/
+venv/
+.venv/
+
+# キャッシュ
+.cache/
+.next/
+__pycache__/
+*.pyc
+
+# Git
+.git/
+
+# ログ・一時ファイル
+*.log
+*.tmp
+
+# 機密情報
+.env
+.env.*
+*.pem
+*.key

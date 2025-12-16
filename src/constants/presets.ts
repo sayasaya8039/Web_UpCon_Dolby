@@ -1,0 +1,115 @@
+import type { AudioSettings, PresetType } from '@/types/audio.types';
+
+/** デフォルト設定 */
+export const DEFAULT_SETTINGS: AudioSettings = {
+  enabled: true,
+  preset: 'music',
+  masterVolume: 100,
+  upsampling: {
+    enabled: true,
+    targetSampleRate: 96000,
+    quality: 'sinc',
+  },
+  frequencyExtension: {
+    enabled: true,
+    maxFrequency: 24000,
+    intensity: 50,
+  },
+  spatialAudio: {
+    enabled: true,
+    mode: 'stereo-wide',
+    width: 60,
+    depth: 40,
+    height: 30,
+  },
+};
+
+/** プリセット定義 */
+export const PRESETS: Record<PresetType, Partial<AudioSettings>> = {
+  music: {
+    preset: 'music',
+    upsampling: {
+      enabled: true,
+      targetSampleRate: 96000,
+      quality: 'sinc',
+    },
+    frequencyExtension: {
+      enabled: true,
+      maxFrequency: 24000,
+      intensity: 50,
+    },
+    spatialAudio: {
+      enabled: true,
+      mode: 'stereo-wide',
+      width: 60,
+      depth: 40,
+      height: 30,
+    },
+  },
+  movie: {
+    preset: 'movie',
+    upsampling: {
+      enabled: true,
+      targetSampleRate: 48000,
+      quality: 'sinc',
+    },
+    frequencyExtension: {
+      enabled: true,
+      maxFrequency: 20000,
+      intensity: 30,
+    },
+    spatialAudio: {
+      enabled: true,
+      mode: 'surround-71',
+      width: 80,
+      depth: 70,
+      height: 50,
+    },
+  },
+  gaming: {
+    preset: 'gaming',
+    upsampling: {
+      enabled: true,
+      targetSampleRate: 48000,
+      quality: 'linear', // 低遅延優先
+    },
+    frequencyExtension: {
+      enabled: false,
+      maxFrequency: 20000,
+      intensity: 0,
+    },
+    spatialAudio: {
+      enabled: true,
+      mode: 'atmos',
+      width: 100,
+      depth: 100,
+      height: 80,
+    },
+  },
+  custom: {
+    preset: 'custom',
+  },
+};
+
+/** サンプルレートオプション */
+export const SAMPLE_RATE_OPTIONS = [
+  { value: 48000, label: '48 kHz' },
+  { value: 96000, label: '96 kHz' },
+  { value: 192000, label: '192 kHz' },
+] as const;
+
+/** 空間オーディオモードオプション */
+export const SPATIAL_MODE_OPTIONS = [
+  { value: 'off', label: 'OFF' },
+  { value: 'stereo-wide', label: 'ステレオワイド' },
+  { value: 'surround-71', label: '7.1ch サラウンド' },
+  { value: 'atmos', label: 'Dolby Atmos風' },
+] as const;
+
+/** 周波数拡張上限オプション */
+export const FREQUENCY_OPTIONS = [
+  { value: 20000, label: '20 kHz' },
+  { value: 24000, label: '24 kHz' },
+  { value: 28000, label: '28 kHz' },
+  { value: 32000, label: '32 kHz' },
+] as const;

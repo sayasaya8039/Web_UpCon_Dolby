@@ -1,0 +1,60 @@
+{
+  "manifest_version": 3,
+  "name": "Web UpCon Dolby",
+  "description": "配信サービスの音声をリアルタイムでアップサンプリング・空間オーディオ化",
+  "version": "1.0.0",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "src/popup/index.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png"
+    },
+    "default_title": "Web UpCon Dolby"
+  },
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "https://music.youtube.com/*",
+    "https://music.amazon.co.jp/*",
+    "https://music.amazon.com/*",
+    "https://open.spotify.com/*",
+    "https://www.netflix.com/*",
+    "https://music.apple.com/*"
+  ],
+  "background": {
+    "service_worker": "src/background/service-worker.ts",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.youtube.com/*",
+        "https://music.youtube.com/*",
+        "https://music.amazon.co.jp/*",
+        "https://music.amazon.com/*",
+        "https://open.spotify.com/*",
+        "https://www.netflix.com/*",
+        "https://music.apple.com/*"
+      ],
+      "js": ["src/content/content-script.ts"],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "src/audio/worklets/*.js"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

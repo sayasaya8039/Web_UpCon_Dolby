@@ -1,0 +1,39 @@
+{
+  "name": "web-upcon-dolby",
+  "version": "1.0.0",
+  "description": "リアルタイム音声アップサンプリング・空間オーディオ Chrome拡張機能",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "lint": "eslint src --ext ts,tsx",
+    "type-check": "tsc --noEmit"
+  },
+  "keywords": [
+    "chrome-extension",
+    "audio",
+    "upsampling",
+    "spatial-audio",
+    "dolby-atmos"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
+  },
+  "devDependencies": {
+    "@crxjs/vite-plugin": "^2.0.0-beta.33",
+    "@types/chrome": "^0.1.32",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@typescript-eslint/eslint-plugin": "^8.50.0",
+    "@typescript-eslint/parser": "^8.50.0",
+    "@vitejs/plugin-react": "^5.1.2",
+    "eslint": "^9.39.2",
+    "terser": "^5.44.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.0"
+  }
+}
