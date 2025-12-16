@@ -23,6 +23,36 @@ export class AudioPipeline {
   private currentElement: HTMLMediaElement | null = null;
   private settings: AudioSettings | null = null;
 
+  // GPU/WebGPU
+  private gpuDevice: GPUDevice | null = null;
+  private gpuActive = false;
+
+  /**
+   * WebGPU初期化
+   */
+  private async initWebGPU(): Promise<boolean> {
+    if (!('gpu' in navigator)) {
+      console.log('[AudioPipeline] WebGPUは利用不可');
+      return false;
+    }
+
+    try {
+      const adapter = await (navigator as Navigator & { gpu: GPU }).gpu.requestAdapter();
+      if (!adapter) {
+        console.log('[AudioPipeline] GPUアダプタが見つかりません');
+        return false;
+      }
+
+      this.gpuDevice = await adapter.requestDevice();
+      this.gpuActive = true;
+      console.log('[AudioPipeline] WebGPU初期化完了');
+      return true;
+    } catch (error) {
+      console.warn('[AudioPipeline] WebGPU初期化エラー:', error);
+      return false;
+    }
+  }
+
   /**
    * MediaElementに接続
    */
@@ -153,39 +183,58 @@ export class AudioPipeline {
   updateSettings(settings: AudioSettings): void {
     this.settings = settings;
 
+    // GPU設定が有効になった場合
+    if (settings.useGPU && !this.gpuDevice) {
+      this.initWebGPU();
+    } else if (!settings.useGPU && this.gpuDevice) {
+      this.gpuDevice.destroy();
+      this.gpuDevice = null;
+      this.gpuActive = false;
+    }
+
     // マスターボリューム
     if (this.gainNode) {
       const volume = settings.enabled ? settings.masterVolume / 100 : 0;
       this.gainNode.gain.setTargetAtTime(volume, this.audioContext?.currentTime ?? 0, 0.01);
     }
 
-    // 各Workletに設定を送信
+    // ハイレゾ設定（アップサンプリング + 周波数拡張）
+    const hiResActive = settings.enabled && settings.hiResEnabled;
+
+    // アップサンプラー設定
     if (this.upsamplerNode) {
       this.upsamplerNode.port.postMessage({
         type: 'updateSettings',
-        enabled: settings.enabled && settings.upsampling.enabled,
+        enabled: hiResActive && settings.upsampling.enabled,
         targetSampleRate: settings.upsampling.targetSampleRate,
         quality: settings.upsampling.quality,
+        useGPU: settings.useGPU && this.gpuActive,
       });
     }
 
+    // スペクトラル拡張設定
     if (this.spectralExtenderNode) {
       this.spectralExtenderNode.port.postMessage({
         type: 'updateSettings',
-        enabled: settings.enabled && settings.frequencyExtension.enabled,
+        enabled: hiResActive && settings.frequencyExtension.enabled,
         maxFrequency: settings.frequencyExtension.maxFrequency,
         intensity: settings.frequencyExtension.intensity / 100,
+        useGPU: settings.useGPU && this.gpuActive,
       });
     }
+
+    // 空間オーディオ設定
+    const spatialActive = settings.enabled && settings.spatialEnabled;
 
     if (this.spatialNode) {
       this.spatialNode.port.postMessage({
         type: 'updateSettings',
-        enabled: settings.enabled && settings.spatialAudio.enabled,
+        enabled: spatialActive && settings.spatialAudio.enabled,
         mode: settings.spatialAudio.mode,
         width: settings.spatialAudio.width / 100,
         depth: settings.spatialAudio.depth / 100,
         height: settings.spatialAudio.height / 100,
+        useGPU: settings.useGPU && this.gpuActive,
       });
     }
   }
@@ -203,7 +252,8 @@ export class AudioPipeline {
       inputSampleRate: this.audioContext?.sampleRate ?? 0,
       outputSampleRate: this.settings?.upsampling.targetSampleRate ?? 48000,
       latency,
-      cpuUsage: 0, // Web APIでは直接取得不可
+      cpuUsage: 0,
+      gpuActive: this.gpuActive,
     };
   }
 
@@ -262,6 +312,11 @@ export class AudioPipeline {
       await this.audioContext.close();
     }
 
+    if (this.gpuDevice) {
+      this.gpuDevice.destroy();
+      this.gpuDevice = null;
+    }
+
     this.audioContext = null;
     this.sourceNode = null;
     this.upsamplerNode = null;
@@ -272,6 +327,7 @@ export class AudioPipeline {
     this.frequencyData = null;
     this.currentElement = null;
     this.isConnected = false;
+    this.gpuActive = false;
 
     console.log('[AudioPipeline] 切断完了');
   }

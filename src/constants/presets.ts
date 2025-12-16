@@ -3,6 +3,9 @@ import type { AudioSettings, PresetType } from '@/types/audio.types';
 /** デフォルト設定 */
 export const DEFAULT_SETTINGS: AudioSettings = {
   enabled: true,
+  hiResEnabled: true,
+  spatialEnabled: true,
+  useGPU: false,
   preset: 'music',
   masterVolume: 100,
   upsampling: {
@@ -12,7 +15,7 @@ export const DEFAULT_SETTINGS: AudioSettings = {
   },
   frequencyExtension: {
     enabled: true,
-    maxFrequency: 24000,
+    maxFrequency: 32000,
     intensity: 50,
   },
   spatialAudio: {
@@ -28,6 +31,8 @@ export const DEFAULT_SETTINGS: AudioSettings = {
 export const PRESETS: Record<PresetType, Partial<AudioSettings>> = {
   music: {
     preset: 'music',
+    hiResEnabled: true,
+    spatialEnabled: true,
     upsampling: {
       enabled: true,
       targetSampleRate: 96000,
@@ -35,7 +40,7 @@ export const PRESETS: Record<PresetType, Partial<AudioSettings>> = {
     },
     frequencyExtension: {
       enabled: true,
-      maxFrequency: 24000,
+      maxFrequency: 32000,
       intensity: 50,
     },
     spatialAudio: {
@@ -48,6 +53,8 @@ export const PRESETS: Record<PresetType, Partial<AudioSettings>> = {
   },
   movie: {
     preset: 'movie',
+    hiResEnabled: true,
+    spatialEnabled: true,
     upsampling: {
       enabled: true,
       targetSampleRate: 48000,
@@ -55,7 +62,7 @@ export const PRESETS: Record<PresetType, Partial<AudioSettings>> = {
     },
     frequencyExtension: {
       enabled: true,
-      maxFrequency: 20000,
+      maxFrequency: 24000,
       intensity: 30,
     },
     spatialAudio: {
@@ -68,10 +75,12 @@ export const PRESETS: Record<PresetType, Partial<AudioSettings>> = {
   },
   gaming: {
     preset: 'gaming',
+    hiResEnabled: false,
+    spatialEnabled: true,
     upsampling: {
       enabled: true,
       targetSampleRate: 48000,
-      quality: 'linear', // 低遅延優先
+      quality: 'linear',
     },
     frequencyExtension: {
       enabled: false,
@@ -94,8 +103,8 @@ export const PRESETS: Record<PresetType, Partial<AudioSettings>> = {
 /** サンプルレートオプション */
 export const SAMPLE_RATE_OPTIONS = [
   { value: 48000, label: '48 kHz' },
-  { value: 96000, label: '96 kHz' },
-  { value: 192000, label: '192 kHz' },
+  { value: 96000, label: '96 kHz (Hi-Res)' },
+  { value: 192000, label: '192 kHz (Hi-Res)' },
 ] as const;
 
 /** 空間オーディオモードオプション */
@@ -106,10 +115,11 @@ export const SPATIAL_MODE_OPTIONS = [
   { value: 'atmos', label: 'Dolby Atmos風' },
 ] as const;
 
-/** 周波数拡張上限オプション */
+/** 周波数拡張上限オプション（96kHzサンプルレート対応） */
 export const FREQUENCY_OPTIONS = [
   { value: 20000, label: '20 kHz' },
   { value: 24000, label: '24 kHz' },
-  { value: 28000, label: '28 kHz' },
   { value: 32000, label: '32 kHz' },
+  { value: 40000, label: '40 kHz' },
+  { value: 48000, label: '48 kHz (96kHz必須)' },
 ] as const;

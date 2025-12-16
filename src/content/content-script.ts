@@ -112,6 +112,7 @@ chrome.runtime.onMessage.addListener(
           outputSampleRate: 0,
           latency: 0,
           cpuUsage: 0,
+          gpuActive: false,
         };
         sendResponse(status);
         break;

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { AudioSettings, PresetType, SampleRate, SpatialMode } from '@/types/audio.types';
-import { DEFAULT_SETTINGS, PRESETS, SAMPLE_RATE_OPTIONS, SPATIAL_MODE_OPTIONS, FREQUENCY_OPTIONS } from '@/constants/presets';
+import { DEFAULT_SETTINGS, PRESETS } from '@/constants/presets';
 import { loadSettings, saveSettings } from '@/utils/storage';
 import { sendSettingsToCurrentTab, getStatusFromCurrentTab } from '@/utils/messaging';
 import PresetSelector from './components/PresetSelector';
@@ -9,10 +9,50 @@ import FrequencyExtender from './components/FrequencyExtender';
 import SpatialAudioControl from './components/SpatialAudioControl';
 import SpectrumVisualizer from './components/SpectrumVisualizer';
 
+// スイッチコンポーネント
+interface ToggleSwitchProps {
+  label: string;
+  sublabel?: string;
+  enabled: boolean;
+  onChange: (enabled: boolean) => void;
+  color?: string;
+}
+
+function ToggleSwitch({ label, sublabel, enabled, onChange, color }: ToggleSwitchProps) {
+  return (
+    <div className="toggle-row" onClick={() => onChange(!enabled)}>
+      <div className="toggle-info">
+        <span className="toggle-label">{label}</span>
+        {sublabel && <span className="toggle-sublabel">{sublabel}</span>}
+      </div>
+      <div className={`switch ${enabled ? 'active' : ''}`} style={enabled && color ? { background: color } : {}}>
+        <div className="switch-knob" />
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [settings, setSettings] = useState<AudioSettings>(DEFAULT_SETTINGS);
   const [isConnected, setIsConnected] = useState(false);
   const [latency, setLatency] = useState(0);
+  const [gpuAvailable, setGpuAvailable] = useState(false);
+  const [gpuActive, setGpuActive] = useState(false);
+
+  // GPU可用性チェック
+  useEffect(() => {
+    const checkGPU = async () => {
+      if ('gpu' in navigator) {
+        try {
+          const adapter = await (navigator as Navigator & { gpu: GPU }).gpu.requestAdapter();
+          setGpuAvailable(!!adapter);
+        } catch {
+          setGpuAvailable(false);
+        }
+      }
+    };
+    checkGPU();
+  }, []);
 
   // 設定読み込み
   useEffect(() => {
@@ -24,6 +64,7 @@ export default function App() {
       if (status) {
         setIsConnected(status.connected);
         setLatency(status.latency);
+        setGpuActive(status.gpuActive || false);
       }
     };
     checkStatus();
@@ -41,6 +82,21 @@ export default function App() {
   // メインスイッチ切り替え
   const toggleEnabled = useCallback(() => {
     updateSettings({ ...settings, enabled: !settings.enabled });
+  }, [settings, updateSettings]);
+
+  // ハイレゾ切り替え
+  const toggleHiRes = useCallback(() => {
+    updateSettings({ ...settings, hiResEnabled: !settings.hiResEnabled, preset: 'custom' });
+  }, [settings, updateSettings]);
+
+  // 空間オーディオ切り替え
+  const toggleSpatial = useCallback(() => {
+    updateSettings({ ...settings, spatialEnabled: !settings.spatialEnabled, preset: 'custom' });
+  }, [settings, updateSettings]);
+
+  // GPU切り替え
+  const toggleGPU = useCallback(() => {
+    updateSettings({ ...settings, useGPU: !settings.useGPU });
   }, [settings, updateSettings]);
 
   // プリセット変更
@@ -109,42 +165,74 @@ export default function App() {
           onPresetChange={handlePresetChange}
         />
 
+        {/* メイントグル */}
+        <section className="section toggle-section">
+          <ToggleSwitch
+            label="ハイレゾ"
+            sublabel="アップサンプリング + 周波数拡張"
+            enabled={settings.hiResEnabled}
+            onChange={toggleHiRes}
+            color="#f59e0b"
+          />
+          <ToggleSwitch
+            label="空間オーディオ"
+            sublabel="サラウンド / Dolby Atmos風"
+            enabled={settings.spatialEnabled}
+            onChange={toggleSpatial}
+            color="#8b5cf6"
+          />
+          {gpuAvailable && (
+            <ToggleSwitch
+              label="GPUアクセラレーション"
+              sublabel={gpuActive ? 'WebGPU使用中' : 'WebGPU利用可能'}
+              enabled={settings.useGPU}
+              onChange={toggleGPU}
+              color="#10b981"
+            />
+          )}
+        </section>
+
         {/* スペクトラムビジュアライザー */}
         <SpectrumVisualizer enabled={settings.enabled && isConnected} />
 
-        {/* アップサンプリング */}
-        <SampleRateControl
-          sampleRate={settings.upsampling.targetSampleRate}
-          enabled={settings.upsampling.enabled}
-          quality={settings.upsampling.quality}
-          onSampleRateChange={handleSampleRateChange}
-          onEnabledChange={(enabled) => {
-            updateSettings({
-              ...settings,
-              preset: 'custom',
-              upsampling: { ...settings.upsampling, enabled },
-            });
-          }}
-          onQualityChange={(quality) => {
-            updateSettings({
-              ...settings,
-              preset: 'custom',
-              upsampling: { ...settings.upsampling, quality },
-            });
-          }}
-        />
+        {/* ハイレゾ設定（展開可能） */}
+        {settings.hiResEnabled && (
+          <>
+            <SampleRateControl
+              sampleRate={settings.upsampling.targetSampleRate}
+              enabled={settings.upsampling.enabled}
+              quality={settings.upsampling.quality}
+              onSampleRateChange={handleSampleRateChange}
+              onEnabledChange={(enabled) => {
+                updateSettings({
+                  ...settings,
+                  preset: 'custom',
+                  upsampling: { ...settings.upsampling, enabled },
+                });
+              }}
+              onQualityChange={(quality) => {
+                updateSettings({
+                  ...settings,
+                  preset: 'custom',
+                  upsampling: { ...settings.upsampling, quality },
+                });
+              }}
+            />
 
-        {/* 周波数拡張 */}
-        <FrequencyExtender
-          settings={settings.frequencyExtension}
-          onChange={handleFrequencyExtensionChange}
-        />
+            <FrequencyExtender
+              settings={settings.frequencyExtension}
+              onChange={handleFrequencyExtensionChange}
+            />
+          </>
+        )}
 
-        {/* 空間オーディオ */}
-        <SpatialAudioControl
-          settings={settings.spatialAudio}
-          onChange={handleSpatialAudioChange}
-        />
+        {/* 空間オーディオ設定（展開可能） */}
+        {settings.spatialEnabled && (
+          <SpatialAudioControl
+            settings={settings.spatialAudio}
+            onChange={handleSpatialAudioChange}
+          />
+        )}
       </main>
 
       {/* ステータスバー */}
@@ -159,6 +247,11 @@ export default function App() {
         <div className="status-item">
           <span>{settings.upsampling.targetSampleRate / 1000} kHz</span>
         </div>
+        {settings.useGPU && gpuActive && (
+          <div className="status-item">
+            <span style={{ color: '#10b981' }}>GPU</span>
+          </div>
+        )}
       </footer>
     </div>
   );

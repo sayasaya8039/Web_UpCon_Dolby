@@ -316,3 +316,70 @@ body {
   opacity: 0.5;
   pointer-events: none;
 }
+
+/* トグルセクション */
+.toggle-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-sm) 0;
+  cursor: pointer;
+  border-bottom: 1px solid var(--bg-tertiary);
+}
+
+.toggle-row:last-child {
+  border-bottom: none;
+}
+
+.toggle-row:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.toggle-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.toggle-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.toggle-sublabel {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* ハイレゾバッジ */
+.hires-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  background: linear-gradient(135deg, #f59e0b, #fbbf24);
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: 700;
+  color: #000;
+  margin-left: var(--spacing-sm);
+}
+
+/* GPUバッジ */
+.gpu-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  background: linear-gradient(135deg, #10b981, #34d399);
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: 700;
+  color: #000;
+  margin-left: var(--spacing-sm);
+}

@@ -12,7 +12,7 @@ export type PresetType = 'music' | 'movie' | 'gaming' | 'custom';
 /** 周波数拡張設定 */
 export interface FrequencyExtensionSettings {
   enabled: boolean;
-  /** 拡張上限周波数 (Hz) */
+  /** 拡張上限周波数 (Hz) - 最大48000Hz (96kHz出力時) */
   maxFrequency: number;
   /** 拡張強度 0-100 */
   intensity: number;
@@ -41,8 +41,14 @@ export interface SpatialAudioSettings {
 
 /** 全体設定 */
 export interface AudioSettings {
-  /** 処理有効/無効 */
+  /** 全体処理有効/無効 */
   enabled: boolean;
+  /** ハイレゾ処理有効/無効（アップサンプリング+周波数拡張） */
+  hiResEnabled: boolean;
+  /** 空間オーディオ有効/無効 */
+  spatialEnabled: boolean;
+  /** GPUアクセラレーション使用 */
+  useGPU: boolean;
   /** 現在のプリセット */
   preset: PresetType;
   /** マスターボリューム 0-100 */
@@ -82,6 +88,8 @@ export interface AudioStatus {
   latency: number;
   /** CPU使用率 (%) */
   cpuUsage: number;
+  /** GPU使用中 */
+  gpuActive: boolean;
 }
 
 /** スペクトラムデータ */
