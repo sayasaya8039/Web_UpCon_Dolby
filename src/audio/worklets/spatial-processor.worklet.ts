@@ -57,6 +57,17 @@ class SpatialProcessor extends AudioWorkletProcessor {
   private pinnaCombWritePos: number = 0;
   private readonly PINNA_DELAY = 18; // 約0.375ms（耳介の共鳴）
 
+  // 7.1chサラウンド用ディレイバッファ
+  private readonly SURROUND_DELAY_SIZE = 4800; // 100ms @48kHz
+  private surroundDelayL: Float32Array;
+  private surroundDelayR: Float32Array;
+  private surroundWritePos: number = 0;
+
+  // サラウンドチャンネル用フィルタ状態
+  private surroundFilterState: { y1: number }[] = [
+    { y1: 0 }, { y1: 0 }, { y1: 0 }, { y1: 0 }
+  ];
+
   constructor() {
     super();
 
@@ -81,6 +92,10 @@ class SpatialProcessor extends AudioWorkletProcessor {
       new Float32Array(this.PINNA_DELAY * 2),
       new Float32Array(this.PINNA_DELAY * 2),
     ];
+
+    // 7.1chサラウンド用バッファ
+    this.surroundDelayL = new Float32Array(this.SURROUND_DELAY_SIZE);
+    this.surroundDelayR = new Float32Array(this.SURROUND_DELAY_SIZE);
 
     this.port.onmessage = (event) => {
       if (event.data.type === 'updateSettings') {
@@ -326,17 +341,93 @@ class SpatialProcessor extends AudioWorkletProcessor {
   }
 
   /**
-   * サラウンド処理（7.1ch風）
+   * サラウンド用ローパスフィルタ（リアスピーカーの高周波減衰）
+   */
+  private applySurroundFilter(sample: number, filterIdx: number, cutoffHz: number): number {
+    const rc = 1 / (2 * Math.PI * cutoffHz);
+    const dt = 1 / sampleRate;
+    const alpha = dt / (rc + dt);
+
+    const state = this.surroundFilterState[filterIdx];
+    const output = state.y1 + alpha * (sample - state.y1);
+    state.y1 = output;
+
+    return output;
+  }
+
+  /**
+   * 7.1chサラウンド処理
+   * 仮想スピーカー配置:
+   * - Front L/R: ±30°（ステレオ入力をそのまま使用）
+   * - Center: 0°（L+Rのモノミックス）
+   * - Surround L/R: ±110°（遅延+フィルタ処理）
+   * - Surround Back L/R: ±150°（さらに遅延）
+   * - LFE: 低域抽出
    */
   private processSurround(left: number, right: number): [number, number] {
+    const width = this.settings.width / 100;
     const depth = this.settings.depth / 100;
     const hrtfScale = this.getHrtfScale();
 
-    // ステレオワイド
-    let [outL, outR] = this.processStereoWide(left, right);
+    // ディレイバッファに書き込み
+    this.surroundDelayL[this.surroundWritePos] = left;
+    this.surroundDelayR[this.surroundWritePos] = right;
 
-    // 早期反射で空間感を追加（HRTF強度でスケール）
-    [outL, outR] = this.applyEarlyReflections(outL, outR, depth * hrtfScale);
+    // === フロント L/R（ステレオワイド処理済み） ===
+    let [frontL, frontR] = this.processStereoWide(left, right);
+
+    // === センターチャンネル（ダイアログ強調） ===
+    const center = (left + right) * 0.3 * depth;
+
+    // === サラウンド L/R（±110°、15-25ms遅延） ===
+    const surroundDelay = this.settings.lowLatencyMode ? 720 : 1200; // 15-25ms
+    const surroundReadPos = (this.surroundWritePos - surroundDelay + this.SURROUND_DELAY_SIZE) % this.SURROUND_DELAY_SIZE;
+
+    // サラウンドは逆相＋ローパスで後方感を出す
+    let surroundL = this.surroundDelayR[surroundReadPos]; // クロス
+    let surroundR = this.surroundDelayL[surroundReadPos]; // クロス
+    surroundL = this.applySurroundFilter(surroundL, 0, 6000) * 0.5 * depth * hrtfScale;
+    surroundR = this.applySurroundFilter(surroundR, 1, 6000) * 0.5 * depth * hrtfScale;
+
+    // === サラウンドバック L/R（±150°、35-50ms遅延） ===
+    const backDelay = this.settings.lowLatencyMode ? 1680 : 2400; // 35-50ms
+    const backReadPos = (this.surroundWritePos - backDelay + this.SURROUND_DELAY_SIZE) % this.SURROUND_DELAY_SIZE;
+
+    // バックはさらにローパス＋減衰
+    let backL = this.surroundDelayL[backReadPos];
+    let backR = this.surroundDelayR[backReadPos];
+    backL = this.applySurroundFilter(backL, 2, 4000) * 0.35 * depth * hrtfScale;
+    backR = this.applySurroundFilter(backR, 3, 4000) * 0.35 * depth * hrtfScale;
+
+    // === LFE（低域抽出、80Hz以下） ===
+    const mono = (left + right) * 0.5;
+    const lfe = this.applySurroundFilter(mono, 0, 80) * 0.2 * depth;
+
+    this.surroundWritePos = (this.surroundWritePos + 1) % this.SURROUND_DELAY_SIZE;
+
+    // === ミックスダウン（バイノーラル） ===
+    // 各チャンネルをHRTFを考慮してL/Rに振り分け
+    let outL = frontL * 0.7;
+    let outR = frontR * 0.7;
+
+    // センター（中央なので両方に均等）
+    outL += center;
+    outR += center;
+
+    // サラウンド（後方なので逆位相成分を含む）
+    outL += surroundL * 0.8 - surroundR * 0.2;
+    outR += surroundR * 0.8 - surroundL * 0.2;
+
+    // サラウンドバック（さらに後方）
+    outL += backL * 0.6 - backR * 0.3;
+    outR += backR * 0.6 - backL * 0.3;
+
+    // LFE（両チャンネルに均等）
+    outL += lfe;
+    outR += lfe;
+
+    // 早期反射で部屋の響きを追加
+    [outL, outR] = this.applyEarlyReflections(outL, outR, depth * hrtfScale * 0.5);
 
     return [outL, outR];
   }
