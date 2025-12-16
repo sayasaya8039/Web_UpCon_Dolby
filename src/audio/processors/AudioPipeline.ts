@@ -67,10 +67,13 @@ export class AudioPipeline {
 
     try {
       // AudioContext作成
+      // 注意: ブラウザによってはリクエストしたサンプルレートが無視される場合があります
+      const targetSampleRate = this.settings?.upsampling?.targetSampleRate ?? 48000;
       this.audioContext = new AudioContext({
-        sampleRate: 48000, // 初期サンプルレート
+        sampleRate: targetSampleRate,
         latencyHint: 'interactive',
       });
+      console.log(`[AudioPipeline] AudioContext作成: ${this.audioContext.sampleRate}Hz`);
 
       // AudioWorkletを登録
       await this.loadWorklets();
